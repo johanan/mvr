@@ -13,9 +13,11 @@ type Connection struct {
 }
 
 type StreamConfig struct {
-	StreamName string `json:"stream_name,omitempty" yaml:"stream_name,omitempty"`
-	Object     string `json:"object,omitempty" yaml:"object,omitempty"`
-	Format     string `json:"format,omitempty" yaml:"format,omitempty"`
+	Stream_Name string `json:"stream_name,omitempty" yaml:"stream_name,omitempty"`
+	Object      string `json:"object,omitempty" yaml:"object,omitempty"`
+	Format      string `json:"format,omitempty" yaml:"format,omitempty"`
+	SQL         string `json:"sql,omitempty" yaml:"sql,omitempty"`
+	Compression string `json:"compression,omitempty" yaml:"compression,omitempty"`
 }
 
 type Config struct {
@@ -55,7 +57,7 @@ func NewConfig(source, dest string, streamConfig *StreamConfig) *Config {
 }
 
 func NewExecutionConfig(config *Config, concurrency int) *ExecutionConfig {
-	sql := "SELECT * FROM " + config.StreamConfig.StreamName
+	sql := "SELECT * FROM " + config.StreamConfig.Stream_Name
 	dbOptions := &DatabaseOptions{Sql: sql}
 
 	return &ExecutionConfig{

@@ -9,14 +9,18 @@ until docker exec -it postgres_test pg_isready -U postgres -d postgres; do
   sleep 2
 done
 
-docker exec -it postgres_test psql -U postgres -d postgres -c "DROP TABLE IF EXISTS users;"
+docker exec -it postgres_test psql -U postgres -d postgres -c "DROP TABLE IF EXISTS users; CREATE EXTENSION IF NOT EXISTS "pgcrypto";"
 
 docker exec -it postgres_test psql -U postgres -d postgres -c "CREATE TABLE IF NOT EXISTS users (
   id SERIAL PRIMARY KEY,
-  name VARCHAR(100),
+  big_id BIGSERIAL,
+  small_id SMALLSERIAL,
+  name VARCHAR(100) NOT NULL,
   created TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  createdz TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+  createdz TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+  unique_id uuid DEFAULT gen_random_uuid(),
+  nullable_id uuid NULL
 );"
 docker exec -it postgres_test psql -U postgres -d postgres -c "TRUNCATE TABLE users;"
 docker exec -it postgres_test psql -U postgres -d postgres -c "INSERT INTO users (name) VALUES ('John Doe'), ('Jane Smith'), ('Alice Johnson'), ('Bob Brown'), ('Jim Smith');"
-docker exec -it postgres_test psql -U postgres -d postgres -c "INSERT INTO users (name, created) VALUES ('Time Test', '2024-10-08 17:22:00');"
+docker exec -it postgres_test psql -U postgres -d postgres -c "INSERT INTO users (name, created) VALUES ('Time Test', '2024-10-08 17:22:00'), ('Time Test 2', '2024-10-08 17:22:00');"

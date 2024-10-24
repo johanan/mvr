@@ -11,6 +11,9 @@ type Column struct {
 	Length       int64  `json:"length,omitempty" yaml:"length,omitempty"`
 	Nullable     bool   `json:"nullable" yaml:"nullable"`
 	ScanType     string `json:"scan_type" yaml:"scan_type"`
+	Position     int    `json:"position" yaml:"position"`
+	Scale        int64  `json:"scale,omitempty" yaml:"scale,omitempty"`
+	Precision    int64  `json:"precision,omitempty" yaml:"precision,omitempty"`
 }
 
 type Batch struct {
@@ -28,6 +31,7 @@ type DataStream struct {
 type DataWriter interface {
 	WriteRow(row []any) error
 	Flush() error
+	Close() error
 }
 
 func (ds *DataStream) BatchesToWriter(wg *sync.WaitGroup, writer DataWriter) {

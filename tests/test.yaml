@@ -1,0 +1,3 @@
+stream_name: public.users
+format: parquet
+compression: snappy

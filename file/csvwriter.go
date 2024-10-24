@@ -23,9 +23,9 @@ func (cw *CSVDataWriter) WriteRow(row []any) error {
 			// Check if the db type has tz info or not
 			if t, ok := col.(time.Time); ok {
 				if cw.datastream.Columns[i].DatabaseType == "TIMESTAMP" {
-					stringRow[i] = t.Format("2006-01-02 15:04:05")
+					stringRow[i] = t.Format(data.RFC3339NanoNoTZ)
 				} else if cw.datastream.Columns[i].DatabaseType == "TIMESTAMPTZ" {
-					stringRow[i] = t.Format("2006-01-02 15:04:05-0700")
+					stringRow[i] = t.Format(time.RFC3339Nano)
 				}
 			} else {
 				stringRow[i] = cast.ToString(col)
@@ -40,6 +40,11 @@ func (cw *CSVDataWriter) WriteRow(row []any) error {
 func (cw *CSVDataWriter) Flush() error {
 	cw.writer.Flush()
 	return cw.writer.Error()
+}
+
+func (cw *CSVDataWriter) Close() error {
+	cw.Flush()
+	return nil
 }
 
 func NewCSVDataWriter(datastream *data.DataStream, writer io.Writer) *CSVDataWriter {

@@ -21,10 +21,14 @@ func GetIo(parsed *url.URL) (io *bufio.Writer, err error) {
 	return io, err
 }
 
-func AddCSV(ds *data.DataStream, writer io.Writer) data.DataWriter {
+func AddCSV(ds *data.DataStream, writer io.Writer) *CSVDataWriter {
 	return NewCSVDataWriter(ds, writer)
 }
 
 func AddJSONL(ds *data.DataStream, writer io.Writer) *JSONLWriter {
 	return &JSONLWriter{datastream: ds, writer: writer}
+}
+
+func AddParquet(ds *data.DataStream, writer io.Writer) *ParquetDataWriter {
+	return NewParquetDataWriter(ds, writer)
 }
