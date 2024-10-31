@@ -1,10 +1,17 @@
 package file
 
 import (
+	"fmt"
 	"io"
+	"math"
+	"math/big"
 	"reflect"
+	"strconv"
+	"strings"
 	"sync"
+	"time"
 
+	"github.com/google/uuid"
 	"github.com/johanan/mvr/data"
 	parquet "github.com/parquet-go/parquet-go"
 	"github.com/parquet-go/parquet-go/compress"
@@ -13,6 +20,8 @@ import (
 	"github.com/parquet-go/parquet-go/format"
 	"github.com/spf13/cast"
 )
+
+var epochDate = time.Date(1970, 1, 1, 0, 0, 0, 0, time.UTC)
 
 type ParquetDataWriter struct {
 	datastream *data.DataStream
@@ -26,8 +35,8 @@ func NewParquetDataWriter(datastream *data.DataStream, ioWriter io.Writer) *Parq
 	if err != nil {
 		panic(err)
 	}
-	r := &RootNode{Columns: make([]ColumnField, len(datastream.Columns))}
-	for i, col := range datastream.Columns {
+	r := &RootNode{Columns: make([]ColumnField, len(datastream.DestColumns))}
+	for i, col := range datastream.DestColumns {
 		r.Columns[i] = ColumnField{Column: col, Node: nodeOf(col)}
 	}
 	schema := parquet.NewSchema("mvr", r)
@@ -41,8 +50,8 @@ func NewParquetDataWriter(datastream *data.DataStream, ioWriter io.Writer) *Parq
 
 func (pw *ParquetDataWriter) WriteRow(row []any) error {
 	// Create a map of column names to values
-	rowMap := make(map[string]any, len(pw.datastream.Columns))
-	for i, col := range pw.datastream.Columns {
+	rowMap := make(map[string]any, len(pw.datastream.DestColumns))
+	for i, col := range pw.datastream.DestColumns {
 		switch col.DatabaseType {
 		case "INT2":
 			rowMap[col.Name] = cast.ToInt16(row[i])
@@ -50,6 +59,63 @@ func (pw *ParquetDataWriter) WriteRow(row []any) error {
 			rowMap[col.Name] = cast.ToInt32(row[i])
 		case "INT8":
 			rowMap[col.Name] = cast.ToInt64(row[i])
+		case "JSONB":
+			rowMap[col.Name] = row[i]
+		case "UUID":
+			if row[i] == nil {
+				rowMap[col.Name] = nil
+			} else {
+				strValue, ok := row[i].(string)
+				if !ok {
+					return fmt.Errorf("expected string for UUID column %s, got %T", col.Name, row[i])
+				}
+				uuidValue, err := uuid.Parse(strValue)
+				if err != nil {
+					return fmt.Errorf("failed to parse UUID for column %s: %v", col.Name, err)
+				}
+				rowMap[col.Name] = uuidValue
+			}
+		case "NUMERIC", "DECIMAL":
+			if row[i] == nil {
+				rowMap[col.Name] = nil
+			} else {
+				switch v := row[i].(type) {
+				case *big.Float:
+					unscaledIntFromFloat := ConvertBigFloatToUnscaledInt(v, int(col.Precision))
+					byteArray, _ := ConvertUnscaledIntToParquetByteArray(unscaledIntFromFloat)
+					rowMap[col.Name] = byteArray
+				case float64:
+					rowMap[col.Name] = v
+				case string:
+					if col.Precision <= 9 {
+						floatValue, err := strconv.ParseFloat(v, 32)
+						if err != nil {
+							return fmt.Errorf("failed to parse float64 for column %s: %v", col.Name, err)
+						}
+
+						unscaledInt := int32(floatValue * math.Pow(10, float64(col.Precision)))
+						rowMap[col.Name] = unscaledInt
+					} else {
+						unscaledInt, _ := ConvertDecimalStringToUnscaledInt(v, int(col.Precision))
+						byteArray, _ := ConvertUnscaledIntToParquetByteArray(unscaledInt)
+						rowMap[col.Name] = byteArray
+					}
+				default:
+					return fmt.Errorf("unexpected type for NUMERIC/DECIMAL column %s: %T", col.Name, row[i])
+				}
+			}
+		case "DATE":
+			if row[i] == nil {
+				rowMap[col.Name] = nil
+			} else {
+				dateValue, ok := row[i].(time.Time)
+				if !ok {
+					return fmt.Errorf("expected time.Time for DATE column %s, got %T", col.Name, row[i])
+				}
+				// Convert the date to the number of days since the Unix epoch
+				daysSinceEpoch := int32(dateValue.Sub(epochDate).Truncate(24*time.Hour).Hours() / 24)
+				rowMap[col.Name] = daysSinceEpoch
+			}
 		default:
 			rowMap[col.Name] = row[i]
 		}
@@ -139,12 +205,35 @@ func nodeOf(col data.Column) parquet.Node {
 		return optional(parquet.Int(64), col)
 	case "UUID":
 		return optional(parquet.UUID(), col)
+	case "FLOAT8", "FLOAT4":
+		// for some reason both scan in as float64
+		return optional(parquet.Leaf(parquet.DoubleType), col)
+	case "NUMERIC", "DECIMAL":
+		// 16 bytes for 128-bit decimal. That will cover DECIMAL(38, X) which should give us
+		// coverage for Snowflake
+		fixed := parquet.FixedLenByteArrayType(16)
+		// Scale is larger than 18, use ByteArray
+		if col.Scale >= 19 {
+			return optional(parquet.Decimal(int(col.Precision), int(col.Scale), fixed), col)
+		}
+		// Determine the appropriate type based on precision
+		if col.Precision <= 9 {
+			return optional(parquet.Decimal(int(col.Precision), int(col.Scale), parquet.Int32Type), col)
+		} else if col.Precision <= 18 {
+			return optional(parquet.Decimal(int(col.Precision), int(col.Scale), parquet.Int64Type), col)
+		} else {
+			return optional(parquet.Decimal(int(col.Precision), int(col.Scale), fixed), col)
+		}
+	case "DATE":
+		return optional(parquet.Date(), col)
 	case "TIMESTAMP":
 		return optional(TimestampNTZ(parquet.Nanosecond), col)
 	case "TIMESTAMPTZ":
 		return optional(parquet.Timestamp(parquet.Nanosecond), col)
 	case "VARCHAR":
 		return optional(parquet.String(), col)
+	case "JSONB":
+		return optional(parquet.JSON(), col)
 	default:
 		return optional(parquet.String(), col)
 	}
@@ -316,4 +405,115 @@ func (t *timestampType) AssignValue(dst reflect.Value, src parquet.Value) error 
 func (t *timestampType) ConvertValue(val parquet.Value, typ parquet.Type) (parquet.Value, error) {
 	// breaking this to just get going
 	return val, nil
+}
+
+func ConvertDecimalStringToUnscaledInt(decimalStr string, scale int) (*big.Int, error) {
+	negative := false
+	if strings.HasPrefix(decimalStr, "-") {
+		negative = true
+		decimalStr = decimalStr[1:]
+	}
+
+	parts := strings.Split(decimalStr, ".")
+	if len(parts) > 2 {
+		return nil, fmt.Errorf("invalid decimal format: %s", decimalStr)
+	}
+
+	integerPart := parts[0]
+	fractionalPart := ""
+	if len(parts) == 2 {
+		fractionalPart = parts[1]
+	}
+
+	if len(fractionalPart) > scale {
+		return nil, fmt.Errorf("fractional part exceeds scale: %s", decimalStr)
+	}
+	fractionalPart = fractionalPart + strings.Repeat("0", scale-len(fractionalPart))
+
+	unscaledStr := integerPart + fractionalPart
+	unscaledValue, success := new(big.Int).SetString(unscaledStr, 10)
+	if !success {
+		return nil, fmt.Errorf("failed to parse unscaled value: %s", unscaledStr)
+	}
+
+	if negative {
+		unscaledValue.Neg(unscaledValue)
+	}
+
+	return unscaledValue, nil
+}
+
+var scaleFactors = make(map[int]*big.Float)
+
+func FastPowerOfTen(scale int) *big.Float {
+	if factor, exists := scaleFactors[scale]; exists {
+		return factor
+	}
+
+	result := big.NewFloat(1)
+	base := big.NewFloat(10)
+
+	for scale > 0 {
+		if scale%2 != 0 {
+			result.Mul(result, base)
+		}
+		base.Mul(base, base)
+		scale /= 2
+	}
+
+	scaleFactors[scale] = result
+	return result
+}
+
+// ConvertBigFloatToUnscaledInt converts a big.Float to a big.Int by applying the scale
+func ConvertBigFloatToUnscaledInt(value *big.Float, scale int) *big.Int {
+	// Get the scaling factor efficiently
+	scalingFactor := FastPowerOfTen(scale)
+
+	// Multiply the big.Float value by the scaling factor
+	scaledValue := new(big.Float).Mul(value, scalingFactor)
+
+	// Convert the scaled value to a big.Int
+	unscaledInt := new(big.Int)
+	scaledValue.Int(unscaledInt)
+
+	return unscaledInt
+}
+
+func ConvertUnscaledIntToParquetByteArray(unscaledValue *big.Int) ([]byte, error) {
+	if unscaledValue == nil {
+		return nil, fmt.Errorf("unscaled value is nil")
+	}
+
+	// Create a fixed-length 16-byte array
+	fixedLengthArray := make([]byte, 16)
+
+	// Convert the unscaled value to bytes
+	byteArray := unscaledValue.Bytes()
+	if len(byteArray) > 16 {
+		return nil, fmt.Errorf("unscaled value is too large to fit in 16 bytes")
+	}
+
+	// Copy the byteArray to the fixed-length array, right-aligned (big-endian)
+	copy(fixedLengthArray[16-len(byteArray):], byteArray)
+
+	// If the value is negative, convert to two's complement
+	if unscaledValue.Sign() < 0 {
+		for i := 0; i < len(fixedLengthArray); i++ {
+			fixedLengthArray[i] = ^fixedLengthArray[i]
+		}
+
+		// Add one to the result to complete the two's complement
+		carry := true
+		for i := len(fixedLengthArray) - 1; i >= 0 && carry; i-- {
+			if fixedLengthArray[i] == 0xFF {
+				fixedLengthArray[i] = 0x00
+			} else {
+				fixedLengthArray[i]++
+				carry = false
+			}
+		}
+	}
+
+	return fixedLengthArray, nil
 }

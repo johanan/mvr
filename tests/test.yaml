@@ -1,3 +1,6 @@
 stream_name: public.users
-format: parquet
-compression: snappy
+format: csv
+filename: {{ now | date "2006/01/02" }}/users-{{ now | unixEpoch }}.csv.gz
+compression: gzip
+sql: |
+  SELECT * FROM public.users LIMIT 1000

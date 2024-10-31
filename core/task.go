@@ -7,14 +7,15 @@ import (
 	"errors"
 	"io"
 	"log"
-	"net/url"
+	"os"
 	"runtime"
 	"sync"
 
 	"github.com/johanan/mvr/data"
 	"github.com/johanan/mvr/database"
 	"github.com/johanan/mvr/file"
-	"github.com/spf13/viper"
+	"github.com/johanan/mvr/utils"
+	"github.com/snowflakedb/gosnowflake"
 )
 
 type Context struct {
@@ -44,30 +45,54 @@ func NewTask(exec ExecutionConfig) *Task {
 	}
 }
 
-func SetupDb2File(sConfig *StreamConfig) (*Task, error) {
-	connStr := viper.GetString("source")
-	if connStr == "" {
+func SetupMv(sConfig *data.StreamConfig) (*Task, error) {
+	connData := os.Getenv("MVR_SOURCE")
+	if connData == "" {
 		return nil, errors.New("source connection string is required")
 	}
-	destStr := viper.GetString("dest")
-	if destStr == "" {
+	destData := os.Getenv("MVR_DEST")
+	if destData == "" {
 		return nil, errors.New("destination connection string is required")
 	}
 
-	config := NewConfig(connStr, destStr, sConfig)
+	srcTemplate, err := utils.ParseTemplate("TMPL_SOURCE", connData)
+	if err != nil {
+		return nil, err
+	}
+	connStr, err := utils.ExecuteTemplate(srcTemplate, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	destTemplate, err := utils.ParseTemplate("TMPL_DEST", destData)
+	if err != nil {
+		return nil, err
+	}
+	destStr, err := utils.ExecuteTemplate(destTemplate, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	config := NewConfig(string(connStr), string(destStr), sConfig)
 	numCores := runtime.NumCPU()
 	runtime.GOMAXPROCS(numCores)
 	execConfig := NewExecutionConfig(config, numCores)
 	return NewTask(*execConfig), nil
 }
 
-func RunDb2File(task *Task) error {
-	datastream, db := database.CreateDataStream(task.ExecConfig.Config.SourceConn.ParsedUrl, task.ExecConfig.ReaderOptions.Sql)
+func RunMv(task *Task) error {
+	datastream, db := database.CreateDataStream(task.ExecConfig.Config.SourceConn.ParsedUrl, task.ExecConfig.Config.StreamConfig)
 	task.ExecConfig.ReaderConn = db
 	defer db.Close()
 
+	// get the writer
+	bufWriter, err := file.GetIo(task.ExecConfig.Config.DestConn.ParsedUrl, task.ExecConfig.Config.StreamConfig)
+	if err != nil {
+		return err
+	}
+
 	// just a string for now
-	compressedWriter, err := CreateCompressedWriter(task.ExecConfig.Config.DestConn.ParsedUrl, task.ExecConfig.Config.StreamConfig.Compression, task.ExecConfig.Config.StreamConfig.Format)
+	compressedWriter, err := CreateCompressedWriter(bufWriter, task.ExecConfig.Config.StreamConfig.Compression, task.ExecConfig.Config.StreamConfig.Format)
 	if err != nil {
 		return err
 	}
@@ -94,12 +119,7 @@ func RunDb2File(task *Task) error {
 	return nil
 }
 
-func CreateCompressedWriter(outputURL *url.URL, compressionType string, format string) (io.WriteCloser, error) {
-	bufWriter, err := file.GetIo(outputURL)
-	if err != nil {
-		return nil, err
-	}
-
+func CreateCompressedWriter(bufWriter *bufio.Writer, compressionType string, format string) (io.WriteCloser, error) {
 	if format == "parquet" {
 		return nopWriteCloser{bufWriter}, nil
 	}
@@ -160,18 +180,26 @@ func execute(task *Task, datastream *data.DataStream, writer data.DataWriter) {
 	var readWg = task.ExecConfig.ReaderWg
 	var writeWg = task.ExecConfig.WriterWg
 
-	columns := datastream.Columns
+	columns := datastream.DestColumns
 
 	for i := 0; i < task.ExecConfig.Concurrency; i++ {
 		writeWg.Add(1)
 		go datastream.BatchesToWriter(writeWg, writer)
 	}
 
+	config := task.ExecConfig.Config.StreamConfig
+
 	db := task.ExecConfig.ReaderConn
-	query := task.ExecConfig.ReaderOptions.Sql
+	query := config.SQL
 
 	// Query the database and produce batches
-	result, err := db.Query(query)
+	stmt, err := db.PrepareNamedContext(gosnowflake.WithHigherPrecision(task.Ctx.Ctx), query)
+	if err != nil {
+		log.Fatalf("Failed to prepare query: %v", err)
+	}
+	defer stmt.Close()
+
+	result, err := stmt.QueryContext(gosnowflake.WithHigherPrecision(task.Ctx.Ctx), config.Params)
 	if err != nil {
 		log.Fatalf("Failed to execute query: %v", err)
 	}

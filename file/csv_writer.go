@@ -18,13 +18,13 @@ type CSVDataWriter struct {
 func (cw *CSVDataWriter) WriteRow(row []any) error {
 	stringRow := make([]string, len(row))
 	for i, col := range row {
-		switch cw.datastream.Columns[i].ScanType {
+		switch cw.datastream.DestColumns[i].ScanType {
 		case "Time":
 			// Check if the db type has tz info or not
 			if t, ok := col.(time.Time); ok {
-				if cw.datastream.Columns[i].DatabaseType == "TIMESTAMP" {
+				if cw.datastream.DestColumns[i].DatabaseType == "TIMESTAMP" {
 					stringRow[i] = t.Format(data.RFC3339NanoNoTZ)
-				} else if cw.datastream.Columns[i].DatabaseType == "TIMESTAMPTZ" {
+				} else if cw.datastream.DestColumns[i].DatabaseType == "TIMESTAMPTZ" {
 					stringRow[i] = t.Format(time.RFC3339Nano)
 				}
 			} else {

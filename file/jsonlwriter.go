@@ -15,8 +15,8 @@ type JSONLWriter struct {
 
 func (w *JSONLWriter) WriteRow(row []any) error {
 	// Create a map of column names to values
-	jsonObject := make(map[string]any, len(w.datastream.Columns))
-	for i, col := range w.datastream.Columns {
+	jsonObject := make(map[string]any, len(w.datastream.DestColumns))
+	for i, col := range w.datastream.DestColumns {
 		switch col.DatabaseType {
 		case "TIMESTAMP":
 			if t, ok := row[i].(time.Time); ok {

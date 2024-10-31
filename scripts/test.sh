@@ -19,7 +19,10 @@ docker exec -it postgres_test psql -U postgres -d postgres -c "CREATE TABLE IF N
   created TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   createdz TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
   unique_id uuid DEFAULT gen_random_uuid(),
-  nullable_id uuid NULL
+  nullable_id uuid NULL,
+  decimal_value NUMERIC(38, 15) DEFAULT (RANDOM() * 1000000)::NUMERIC(38, 15),
+  double_value DOUBLE PRECISION DEFAULT RANDOM(),
+  float_value REAL DEFAULT RANDOM()
 );"
 docker exec -it postgres_test psql -U postgres -d postgres -c "TRUNCATE TABLE users;"
 docker exec -it postgres_test psql -U postgres -d postgres -c "INSERT INTO users (name) VALUES ('John Doe'), ('Jane Smith'), ('Alice Johnson'), ('Bob Brown'), ('Jim Smith');"
