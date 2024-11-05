@@ -33,8 +33,6 @@ var mvCmd = &cobra.Command{
 
 		var renderedConfig bytes.Buffer
 		tmpl.Execute(&renderedConfig, tmplVars)
-		// output the rendered config to stdout
-		fmt.Println(renderedConfig.String())
 
 		sConfig, err := d.NewStreamConfigFromYaml(renderedConfig.Bytes())
 		if err != nil {
