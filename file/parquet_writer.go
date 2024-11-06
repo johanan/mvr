@@ -6,7 +6,6 @@ import (
 	"math"
 	"math/big"
 	"reflect"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -52,6 +51,11 @@ func (pw *ParquetDataWriter) WriteRow(row []any) error {
 	// Create a map of column names to values
 	rowMap := make(map[string]any, len(pw.datastream.DestColumns))
 	for i, col := range pw.datastream.DestColumns {
+		if row[i] == nil {
+			rowMap[col.Name] = nil
+			continue
+		}
+
 		switch col.DatabaseType {
 		case "INT2":
 			rowMap[col.Name] = cast.ToInt16(row[i])
@@ -62,60 +66,29 @@ func (pw *ParquetDataWriter) WriteRow(row []any) error {
 		case "JSONB":
 			rowMap[col.Name] = row[i]
 		case "UUID":
-			if row[i] == nil {
-				rowMap[col.Name] = nil
-			} else {
-				strValue, ok := row[i].(string)
-				if !ok {
-					return fmt.Errorf("expected string for UUID column %s, got %T", col.Name, row[i])
-				}
-				uuidValue, err := uuid.Parse(strValue)
-				if err != nil {
-					return fmt.Errorf("failed to parse UUID for column %s: %v", col.Name, err)
-				}
-				rowMap[col.Name] = uuidValue
+			strValue, ok := row[i].(string)
+			if !ok {
+				return fmt.Errorf("expected string for UUID column %s, got %T", col.Name, row[i])
 			}
+			uuidValue, err := uuid.Parse(strValue)
+			if err != nil {
+				return fmt.Errorf("failed to parse UUID for column %s: %v", col.Name, err)
+			}
+			rowMap[col.Name] = uuidValue
 		case "NUMERIC", "DECIMAL":
-			if row[i] == nil {
-				rowMap[col.Name] = nil
-			} else {
-				switch v := row[i].(type) {
-				case *big.Float:
-					unscaledIntFromFloat := ConvertBigFloatToUnscaledInt(v, int(col.Precision))
-					byteArray, _ := ConvertUnscaledIntToParquetByteArray(unscaledIntFromFloat)
-					rowMap[col.Name] = byteArray
-				case float64:
-					rowMap[col.Name] = v
-				case string:
-					if col.Precision <= 9 {
-						floatValue, err := strconv.ParseFloat(v, 32)
-						if err != nil {
-							return fmt.Errorf("failed to parse float64 for column %s: %v", col.Name, err)
-						}
-
-						unscaledInt := int32(floatValue * math.Pow(10, float64(col.Precision)))
-						rowMap[col.Name] = unscaledInt
-					} else {
-						unscaledInt, _ := ConvertDecimalStringToUnscaledInt(v, int(col.Precision))
-						byteArray, _ := ConvertUnscaledIntToParquetByteArray(unscaledInt)
-						rowMap[col.Name] = byteArray
-					}
-				default:
-					return fmt.Errorf("unexpected type for NUMERIC/DECIMAL column %s: %T", col.Name, row[i])
-				}
+			decimalValue, err := convertToParquetDecimal(row[i], int(col.Precision), int(col.Scale))
+			if err != nil {
+				return fmt.Errorf("failed to convert DECIMAL for column %s: %v", col.Name, err)
 			}
+			rowMap[col.Name] = decimalValue
 		case "DATE":
-			if row[i] == nil {
-				rowMap[col.Name] = nil
-			} else {
-				dateValue, ok := row[i].(time.Time)
-				if !ok {
-					return fmt.Errorf("expected time.Time for DATE column %s, got %T", col.Name, row[i])
-				}
-				// Convert the date to the number of days since the Unix epoch
-				daysSinceEpoch := int32(dateValue.Sub(epochDate).Truncate(24*time.Hour).Hours() / 24)
-				rowMap[col.Name] = daysSinceEpoch
+			dateValue, ok := row[i].(time.Time)
+			if !ok {
+				return fmt.Errorf("expected time.Time for DATE column %s, got %T", col.Name, row[i])
 			}
+			// Convert the date to the number of days since the Unix epoch
+			daysSinceEpoch := int32(dateValue.Sub(epochDate).Truncate(24*time.Hour).Hours() / 24)
+			rowMap[col.Name] = daysSinceEpoch
 		default:
 			rowMap[col.Name] = row[i]
 		}
@@ -134,6 +107,60 @@ func (pw *ParquetDataWriter) WriteRow(row []any) error {
 	}
 
 	return nil
+}
+
+func convertToParquetDecimal(value any, precision, scale int) (any, error) {
+	switch v := value.(type) {
+	case *big.Float:
+		// Convert *big.Float to unscaled int
+		unscaledInt := ConvertBigFloatToUnscaledInt(v, precision)
+		// Convert unscaled int to Parquet byte array (big-endian, two's complement)
+		byteArray, err := ConvertUnscaledIntToParquetByteArray(unscaledInt)
+		if err != nil {
+			return nil, err
+		}
+		return byteArray, nil
+
+	case float64:
+		// Convert float64 to unscaled int32 or int64 based on precision
+		if precision <= 9 {
+			unscaledInt := int32(v * math.Pow(10, float64(scale)))
+			return unscaledInt, nil
+		} else if precision <= 18 {
+			unscaledInt := int64(v * math.Pow(10, float64(scale)))
+			return unscaledInt, nil
+		} else {
+			// For higher precision, use *big.Float
+			bigFloat := big.NewFloat(v)
+			unscaledInt := ConvertBigFloatToUnscaledInt(bigFloat, precision)
+			byteArray, err := ConvertUnscaledIntToParquetByteArray(unscaledInt)
+			if err != nil {
+				return nil, err
+			}
+			return byteArray, nil
+		}
+
+	case string:
+		// Convert string to unscaled int
+		unscaledInt, err := ConvertDecimalStringToUnscaledInt(v, precision)
+		if err != nil {
+			return nil, err
+		}
+		if precision <= 9 {
+			return int32(unscaledInt.Int64()), nil
+		} else if precision <= 18 {
+			return unscaledInt.Int64(), nil
+		} else {
+			byteArray, err := ConvertUnscaledIntToParquetByteArray(unscaledInt)
+			if err != nil {
+				return nil, err
+			}
+			return byteArray, nil
+		}
+
+	default:
+		return nil, fmt.Errorf("unsupported type %T for DECIMAL conversion", v)
+	}
 }
 
 func (pw *ParquetDataWriter) Flush() error {
@@ -209,19 +236,15 @@ func nodeOf(col data.Column) parquet.Node {
 		// for some reason both scan in as float64
 		return optional(parquet.Leaf(parquet.DoubleType), col)
 	case "NUMERIC", "DECIMAL":
-		// 16 bytes for 128-bit decimal. That will cover DECIMAL(38, X) which should give us
-		// coverage for Snowflake
-		fixed := parquet.FixedLenByteArrayType(16)
-		// Scale is larger than 18, use ByteArray
-		if col.Scale >= 19 {
-			return optional(parquet.Decimal(int(col.Precision), int(col.Scale), fixed), col)
-		}
 		// Determine the appropriate type based on precision
 		if col.Precision <= 9 {
 			return optional(parquet.Decimal(int(col.Precision), int(col.Scale), parquet.Int32Type), col)
 		} else if col.Precision <= 18 {
 			return optional(parquet.Decimal(int(col.Precision), int(col.Scale), parquet.Int64Type), col)
 		} else {
+			// 16 bytes for 128-bit decimal. That will cover DECIMAL(38, X) which should give us
+			// coverage for Snowflake
+			fixed := parquet.FixedLenByteArrayType(16)
 			return optional(parquet.Decimal(int(col.Precision), int(col.Scale), fixed), col)
 		}
 	case "DATE":

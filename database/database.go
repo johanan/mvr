@@ -72,7 +72,7 @@ func GetColumns(db *sqlx.DB, query string, dbType string, arg map[string]interfa
 	for i, col := range columns {
 		length, _ := col.Length()
 		nullable, _ := col.Nullable()
-		scale, precision, _ := col.DecimalSize()
+		precision, scale, _ := col.DecimalSize()
 		cols = append(cols, Column{
 			Name:         col.Name(),
 			DatabaseType: col.DatabaseTypeName(),
@@ -92,21 +92,29 @@ func sfColumnsToPg(columns []Column) []Column {
 	pgCols := make([]Column, len(columns))
 	copy(pgCols, columns)
 	for i, col := range pgCols {
-		if col.DatabaseType == "FIXED" && col.ScanType == "float64" {
-			pgCols[i].DatabaseType = "NUMERIC"
-			pgCols[i].Precision = col.Precision
-			pgCols[i].Scale = col.Scale
-		}
-		if col.DatabaseType == "FIXED" && col.ScanType == "int64" {
-			pgCols[i].DatabaseType = "INT8"
-		}
-		if col.DatabaseType == "TIMESTAMP_NTZ" {
+		switch col.DatabaseType {
+		case "FIXED":
+			if col.Scale == 0 {
+				switch {
+				case col.Precision <= 4:
+					pgCols[i].DatabaseType = "INT2" // 2 bytes
+				case col.Precision <= 9:
+					pgCols[i].DatabaseType = "INT4" // 4 bytes
+				default:
+					pgCols[i].DatabaseType = "INT8" // 8 bytes
+				}
+			} else {
+				pgCols[i].DatabaseType = "NUMERIC"
+				pgCols[i].Precision = col.Precision
+				pgCols[i].Scale = col.Scale
+			}
+		case "TIMESTAMP_NTZ":
 			pgCols[i].DatabaseType = "TIMESTAMP"
-		}
-		if col.DatabaseType == "TIMESTAMP_TZ" {
+
+		case "TIMESTAMP_TZ":
 			pgCols[i].DatabaseType = "TIMESTAMPTZ"
-		}
-		if col.DatabaseType == "ARRAY" || col.DatabaseType == "VARIANT" {
+
+		case "ARRAY", "VARIANT":
 			pgCols[i].DatabaseType = "JSONB"
 		}
 	}
