@@ -2,11 +2,15 @@ package file
 
 import (
 	"encoding/csv"
+	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/johanan/mvr/data"
+	"github.com/shopspring/decimal"
 	"github.com/spf13/cast"
 )
 
@@ -18,17 +22,41 @@ type CSVDataWriter struct {
 func (cw *CSVDataWriter) WriteRow(row []any) error {
 	stringRow := make([]string, len(row))
 	for i, col := range row {
-		switch cw.datastream.DestColumns[i].ScanType {
-		case "Time":
-			// Check if the db type has tz info or not
+		dest := cw.datastream.DestColumns[i]
+		if col == nil {
+			stringRow[i] = "NULL"
+			continue
+		}
+
+		switch dest.DatabaseType {
+		case "TIMESTAMP":
 			if t, ok := col.(time.Time); ok {
-				if cw.datastream.DestColumns[i].DatabaseType == "TIMESTAMP" {
-					stringRow[i] = t.Format(data.RFC3339NanoNoTZ)
-				} else if cw.datastream.DestColumns[i].DatabaseType == "TIMESTAMPTZ" {
-					stringRow[i] = t.Format(time.RFC3339Nano)
-				}
+				stringRow[i] = t.Format(data.RFC3339NanoNoTZ)
 			} else {
 				stringRow[i] = cast.ToString(col)
+			}
+		case "TIMESTAMPTZ":
+			if t, ok := col.(time.Time); ok {
+				stringRow[i] = t.Format(time.RFC3339Nano)
+			} else {
+				stringRow[i] = cast.ToString(col)
+			}
+		case "NUMERIC":
+			// get type of value
+			switch v := col.(type) {
+			case float64:
+				stringRow[i] = cast.ToString(v)
+			case decimal.Decimal:
+				stringRow[i] = v.StringFixed(int32(dest.Scale))
+			case pgtype.Numeric:
+				j, err := json.Marshal(v)
+				if err != nil {
+					log.Fatalf("Failed to marshal pgtype.Numeric: %v", err)
+				}
+				stringRow[i] = string(j)
+			default:
+				fmt.Printf("Unknown type for NUMERIC: %T\n", v)
+				stringRow[i] = cast.ToString(v)
 			}
 		default:
 			stringRow[i] = cast.ToString(col)

@@ -114,12 +114,26 @@ func convertToParquetDecimal(value any, precision, scale int) (any, error) {
 	case *big.Float:
 		// Convert *big.Float to unscaled int
 		unscaledInt := ConvertBigFloatToUnscaledInt(v, precision)
-		// Convert unscaled int to Parquet byte array (big-endian, two's complement)
-		byteArray, err := ConvertUnscaledIntToParquetByteArray(unscaledInt)
-		if err != nil {
-			return nil, err
+		switch {
+		case precision <= 9:
+			if !unscaledInt.IsInt64() {
+				return nil, fmt.Errorf("failed to convert DECIMAL to int32: %v", unscaledInt)
+			}
+			return int32(unscaledInt.Int64()), nil
+
+		case precision <= 18:
+			if !unscaledInt.IsInt64() {
+				return nil, fmt.Errorf("failed to convert DECIMAL to int64: %v", unscaledInt)
+			}
+			return unscaledInt.Int64(), nil
+
+		default:
+			byteArray, err := ConvertUnscaledIntToParquetByteArray(unscaledInt)
+			if err != nil {
+				return nil, err
+			}
+			return byteArray, nil
 		}
-		return byteArray, nil
 
 	case float64:
 		// Convert float64 to unscaled int32 or int64 based on precision

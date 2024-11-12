@@ -27,3 +27,15 @@ docker exec -it postgres_test psql -U postgres -d postgres -c "CREATE TABLE IF N
 docker exec -it postgres_test psql -U postgres -d postgres -c "TRUNCATE TABLE users;"
 docker exec -it postgres_test psql -U postgres -d postgres -c "INSERT INTO users (name) VALUES ('John Doe'), ('Jane Smith'), ('Alice Johnson'), ('Bob Brown'), ('Jim Smith');"
 docker exec -it postgres_test psql -U postgres -d postgres -c "INSERT INTO users (name, created) VALUES ('Time Test', '2024-10-08 17:22:00'), ('Time Test 2', '2024-10-08 17:22:00');"
+
+docker exec -it postgres_test psql -U postgres -d postgres -c "CREATE TABLE IF NOT EXISTS numbers (
+  smallint_value SMALLINT DEFAULT RANDOM(),
+  integer_value INTEGER DEFAULT RANDOM(),
+  bigint_value BIGINT DEFAULT RANDOM(),
+  decimal_value NUMERIC(38, 15) DEFAULT (RANDOM() * 1000000)::NUMERIC(38, 15)
+);"
+
+docker exec -it postgres_test psql -U postgres -d postgres -c "TRUNCATE TABLE numbers;"
+docker exec -it postgres_test psql -U postgres -d postgres -c "INSERT INTO numbers (smallint_value, integer_value, bigint_value, decimal_value) VALUES (1, 1, 1, 468797.177024568000000), (2, 2, 2, 191886.800531254000000), (3, 3, 3, 723041.165430700000000);"
+# now insert numbers that push the limits of the types
+docker exec -it postgres_test psql -U postgres -d postgres -c "INSERT INTO numbers (smallint_value, integer_value, bigint_value, decimal_value) VALUES (32767, 2147483647, 9223372036854775807, 507531.111989867000000);"

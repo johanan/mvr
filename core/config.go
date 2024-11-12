@@ -5,7 +5,6 @@ import (
 	"net/url"
 	"sync"
 
-	"github.com/jmoiron/sqlx"
 	"github.com/johanan/mvr/data"
 )
 
@@ -24,7 +23,6 @@ type Config struct {
 
 type ExecutionConfig struct {
 	Config      *Config
-	ReaderConn  *sqlx.DB
 	WriterPipe  *io.PipeWriter
 	ReaderWg    *sync.WaitGroup
 	WriterWg    *sync.WaitGroup
@@ -48,7 +46,6 @@ func NewConfig(source, dest string, streamConfig *data.StreamConfig) *Config {
 func NewExecutionConfig(config *Config, concurrency int) *ExecutionConfig {
 	return &ExecutionConfig{
 		Config:      config,
-		ReaderConn:  nil,
 		WriterPipe:  nil,
 		ReaderWg:    &sync.WaitGroup{},
 		WriterWg:    &sync.WaitGroup{},

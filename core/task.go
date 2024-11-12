@@ -15,7 +15,6 @@ import (
 	"github.com/johanan/mvr/database"
 	"github.com/johanan/mvr/file"
 	"github.com/johanan/mvr/utils"
-	"github.com/snowflakedb/gosnowflake"
 )
 
 type Context struct {
@@ -81,9 +80,26 @@ func SetupMv(sConfig *data.StreamConfig) (*Task, error) {
 }
 
 func RunMv(task *Task) error {
-	datastream, db := database.CreateDataStream(task.ExecConfig.Config.SourceConn.ParsedUrl, task.ExecConfig.Config.StreamConfig)
-	task.ExecConfig.ReaderConn = db
-	defer db.Close()
+	source := task.ExecConfig.Config.SourceConn.ParsedUrl.Scheme
+	var reader data.DBReaderConn
+	var err error
+
+	switch source {
+	case "postgres":
+		reader, err = database.NewPGDataReader(task.ExecConfig.Config.SourceConn.ParsedUrl)
+	case "snowflake":
+		reader, err = database.NewSnowflakeDataReader(task.ExecConfig.Config.SourceConn.ParsedUrl)
+	default:
+		log.Fatalf("Unsupported source: %s", source)
+	}
+	if err != nil {
+		return err
+	}
+
+	datastream, err := reader.CreateDataStream(task.ExecConfig.Config.SourceConn.ParsedUrl, task.ExecConfig.Config.StreamConfig)
+	if err != nil {
+		return err
+	}
 
 	// get the writer
 	bufWriter, err := file.GetIo(task.ExecConfig.Config.DestConn.ParsedUrl, task.ExecConfig.Config.StreamConfig)
@@ -114,7 +130,7 @@ func RunMv(task *Task) error {
 		log.Fatalf("Unsupported format: %s", task.ExecConfig.Config.StreamConfig.Format)
 	}
 
-	execute(task, datastream, writer)
+	execute(task, datastream, reader, writer)
 	defer writer.Close()
 	return nil
 }
@@ -176,11 +192,9 @@ func (w nopWriteCloser) Close() error {
 	return nil
 }
 
-func execute(task *Task, datastream *data.DataStream, writer data.DataWriter) {
+func execute(task *Task, datastream *data.DataStream, reader data.DBReaderConn, writer data.DataWriter) {
 	var readWg = task.ExecConfig.ReaderWg
 	var writeWg = task.ExecConfig.WriterWg
-
-	columns := datastream.DestColumns
 
 	for i := 0; i < task.ExecConfig.Concurrency; i++ {
 		writeWg.Add(1)
@@ -189,57 +203,16 @@ func execute(task *Task, datastream *data.DataStream, writer data.DataWriter) {
 
 	config := task.ExecConfig.Config.StreamConfig
 
-	db := task.ExecConfig.ReaderConn
-	query := config.SQL
-
-	// Query the database and produce batches
-	stmt, err := db.PrepareNamedContext(gosnowflake.WithHigherPrecision(task.Ctx.Ctx), query)
-	if err != nil {
-		log.Fatalf("Failed to prepare query: %v", err)
-	}
-	defer stmt.Close()
-
-	result, err := stmt.QueryContext(gosnowflake.WithHigherPrecision(task.Ctx.Ctx), config.Params)
-	if err != nil {
-		log.Fatalf("Failed to execute query: %v", err)
-	}
-	defer result.Close()
-
-	batch := data.Batch{Rows: make([][]any, 0, datastream.BatchSize)}
-
 	readWg.Add(1)
 	go func() {
 		defer readWg.Done()
-		for result.Next() {
-			row := make([]any, len(columns))
-			rowPtrs := make([]any, len(columns))
-			for i := range row {
-				rowPtrs[i] = &row[i]
-			}
-			err = result.Scan(rowPtrs...)
-			if err != nil {
-				log.Fatalf("Failed to scan row: %v", err)
-			}
-
-			batch.Rows = append(batch.Rows, row)
-
-			// If the batch reaches the desired size, send it to the channel
-			if len(batch.Rows) >= datastream.BatchSize {
-				datastream.BatchChan <- batch
-				batch = data.Batch{Rows: make([][]any, 0, datastream.BatchSize)}
-			}
-		}
-
-		// Send any remaining rows in the batch
-		if len(batch.Rows) > 0 {
-			datastream.BatchChan <- batch
+		if err := reader.ExecuteDataStream(task.Ctx.Ctx, datastream, config); err != nil {
+			log.Printf("ExecuteDataStream error: %v", err)
+			task.Ctx.Cancel()
 		}
 	}()
 
 	readWg.Wait()
-
-	// Close the batch channel and wait for the processing to complete
-	close(datastream.BatchChan)
 	writeWg.Wait()
 
 	if err := writer.Flush(); err != nil {

@@ -1,8 +1,10 @@
 package data
 
 import (
+	"context"
 	"log"
 	"maps"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -47,6 +49,12 @@ type DataStream struct {
 type DataWriter interface {
 	WriteRow(row []any) error
 	Flush() error
+	Close() error
+}
+
+type DBReaderConn interface {
+	CreateDataStream(cs *url.URL, config *StreamConfig) (*DataStream, error)
+	ExecuteDataStream(ctx context.Context, ds *DataStream, config *StreamConfig) error
 	Close() error
 }
 
