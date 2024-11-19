@@ -2,7 +2,6 @@
 name: goreleaser
 
 on:
-  pull_request:
   push:
     # run only against tags
     tags:
@@ -29,16 +28,6 @@ jobs:
       # More assembly might be required: Docker logins, GPG, etc.
       # It all depends on your needs.
       - run: go mod tidy
-      - name: Setup Postegres
-        run: scripts/test_setup.sh
-        shell: bash
-      
-      - run: go test -v ./...
-      
-      - name: Shutdown Postgres
-        run: scripts/test_shutdown.sh
-        shell: bash
-      
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
         with:

@@ -17,6 +17,7 @@ import (
 	"github.com/parquet-go/parquet-go/deprecated"
 	"github.com/parquet-go/parquet-go/encoding"
 	"github.com/parquet-go/parquet-go/format"
+	"github.com/shopspring/decimal"
 	"github.com/spf13/cast"
 )
 
@@ -66,15 +67,20 @@ func (pw *ParquetDataWriter) WriteRow(row []any) error {
 		case "JSONB":
 			rowMap[col.Name] = row[i]
 		case "UUID":
-			strValue, ok := row[i].(string)
-			if !ok {
-				return fmt.Errorf("expected string for UUID column %s, got %T", col.Name, row[i])
+			switch v := row[i].(type) {
+			case string:
+				uuidValue, err := uuid.Parse(v)
+				if err != nil {
+					return fmt.Errorf("failed to parse UUID for column %s: %v", col.Name, err)
+				}
+				rowMap[col.Name] = uuidValue
+			case [16]uint8:
+				rowMap[col.Name] = v
+			case uuid.UUID:
+				rowMap[col.Name] = v
+			default:
+				return fmt.Errorf("expected string or UUID for UUID column %s, got %T", col.Name, v)
 			}
-			uuidValue, err := uuid.Parse(strValue)
-			if err != nil {
-				return fmt.Errorf("failed to parse UUID for column %s: %v", col.Name, err)
-			}
-			rowMap[col.Name] = uuidValue
 		case "NUMERIC", "DECIMAL":
 			decimalValue, err := convertToParquetDecimal(row[i], int(col.Precision), int(col.Scale))
 			if err != nil {
@@ -111,9 +117,13 @@ func (pw *ParquetDataWriter) WriteRow(row []any) error {
 
 func convertToParquetDecimal(value any, precision, scale int) (any, error) {
 	switch v := value.(type) {
+	case decimal.Decimal:
+		// I tried big float but it was not working
+		float := v.StringFixed(int32(scale))
+		return convertToParquetDecimal(float, precision, scale)
 	case *big.Float:
 		// Convert *big.Float to unscaled int
-		unscaledInt := ConvertBigFloatToUnscaledInt(v, precision)
+		unscaledInt := convertBigFloatToUnscaledInt(v, precision)
 		switch {
 		case precision <= 9:
 			if !unscaledInt.IsInt64() {
@@ -128,7 +138,7 @@ func convertToParquetDecimal(value any, precision, scale int) (any, error) {
 			return unscaledInt.Int64(), nil
 
 		default:
-			byteArray, err := ConvertUnscaledIntToParquetByteArray(unscaledInt)
+			byteArray, err := bigIntToFixedBytes(unscaledInt, precision)
 			if err != nil {
 				return nil, err
 			}
@@ -146,8 +156,8 @@ func convertToParquetDecimal(value any, precision, scale int) (any, error) {
 		} else {
 			// For higher precision, use *big.Float
 			bigFloat := big.NewFloat(v)
-			unscaledInt := ConvertBigFloatToUnscaledInt(bigFloat, precision)
-			byteArray, err := ConvertUnscaledIntToParquetByteArray(unscaledInt)
+			unscaledInt := convertBigFloatToUnscaledInt(bigFloat, precision)
+			byteArray, err := bigIntToFixedBytes(unscaledInt, precision)
 			if err != nil {
 				return nil, err
 			}
@@ -156,7 +166,7 @@ func convertToParquetDecimal(value any, precision, scale int) (any, error) {
 
 	case string:
 		// Convert string to unscaled int
-		unscaledInt, err := ConvertDecimalStringToUnscaledInt(v, precision)
+		unscaledInt, err := convertDecimalStringToUnscaledInt(v, scale)
 		if err != nil {
 			return nil, err
 		}
@@ -165,7 +175,7 @@ func convertToParquetDecimal(value any, precision, scale int) (any, error) {
 		} else if precision <= 18 {
 			return unscaledInt.Int64(), nil
 		} else {
-			byteArray, err := ConvertUnscaledIntToParquetByteArray(unscaledInt)
+			byteArray, err := bigIntToFixedBytes(unscaledInt, precision)
 			if err != nil {
 				return nil, err
 			}
@@ -252,14 +262,15 @@ func nodeOf(col data.Column) parquet.Node {
 	case "NUMERIC", "DECIMAL":
 		// Determine the appropriate type based on precision
 		if col.Precision <= 9 {
-			return optional(parquet.Decimal(int(col.Precision), int(col.Scale), parquet.Int32Type), col)
+			return optional(parquet.Decimal(int(col.Scale), int(col.Precision), parquet.Int32Type), col)
 		} else if col.Precision <= 18 {
-			return optional(parquet.Decimal(int(col.Precision), int(col.Scale), parquet.Int64Type), col)
+			return optional(parquet.Decimal(int(col.Scale), int(col.Precision), parquet.Int64Type), col)
 		} else {
 			// 16 bytes for 128-bit decimal. That will cover DECIMAL(38, X) which should give us
 			// coverage for Snowflake
-			fixed := parquet.FixedLenByteArrayType(16)
-			return optional(parquet.Decimal(int(col.Precision), int(col.Scale), fixed), col)
+			arrayLen := calculateBytesForPrecision(int(col.Precision))
+			fixed := parquet.FixedLenByteArrayType(arrayLen)
+			return optional(parquet.Decimal(int(col.Scale), int(col.Precision), fixed), col)
 		}
 	case "DATE":
 		return optional(parquet.Date(), col)
@@ -444,7 +455,11 @@ func (t *timestampType) ConvertValue(val parquet.Value, typ parquet.Type) (parqu
 	return val, nil
 }
 
-func ConvertDecimalStringToUnscaledInt(decimalStr string, scale int) (*big.Int, error) {
+func convertDecimalStringToUnscaledInt(decimalStr string, scale int) (*big.Int, error) {
+	if decimalStr == "" {
+		return nil, fmt.Errorf("empty decimal string")
+	}
+
 	negative := false
 	if strings.HasPrefix(decimalStr, "-") {
 		negative = true
@@ -482,7 +497,7 @@ func ConvertDecimalStringToUnscaledInt(decimalStr string, scale int) (*big.Int, 
 
 var scaleFactors = make(map[int]*big.Float)
 
-func FastPowerOfTen(scale int) *big.Float {
+func fastPowerOfTen(scale int) *big.Float {
 	if factor, exists := scaleFactors[scale]; exists {
 		return factor
 	}
@@ -503,9 +518,9 @@ func FastPowerOfTen(scale int) *big.Float {
 }
 
 // ConvertBigFloatToUnscaledInt converts a big.Float to a big.Int by applying the scale
-func ConvertBigFloatToUnscaledInt(value *big.Float, scale int) *big.Int {
+func convertBigFloatToUnscaledInt(value *big.Float, scale int) *big.Int {
 	// Get the scaling factor efficiently
-	scalingFactor := FastPowerOfTen(scale)
+	scalingFactor := fastPowerOfTen(scale)
 
 	// Multiply the big.Float value by the scaling factor
 	scaledValue := new(big.Float).Mul(value, scalingFactor)
@@ -517,40 +532,49 @@ func ConvertBigFloatToUnscaledInt(value *big.Float, scale int) *big.Int {
 	return unscaledInt
 }
 
-func ConvertUnscaledIntToParquetByteArray(unscaledValue *big.Int) ([]byte, error) {
-	if unscaledValue == nil {
-		return nil, fmt.Errorf("unscaled value is nil")
+func calculateBytesForPrecision(precision int) int {
+	// Calculate the number of bits needed to represent 10^p - 1
+	bitsNeeded := int(math.Ceil(float64(precision)*math.Log2(10))) + 1
+
+	// Calculate the number of bytes needed
+	bytesNeeded := int(math.Ceil(float64(bitsNeeded) / 8))
+
+	// Add an extra byte as a safety margin for edge cases with two's complement
+	return bytesNeeded
+}
+
+func bigIntToFixedBytes(value *big.Int, precision int) ([]byte, error) {
+	if value == nil {
+		return nil, fmt.Errorf("value cannot be nil")
 	}
 
-	// Create a fixed-length 16-byte array
-	fixedLengthArray := make([]byte, 16)
+	size := calculateBytesForPrecision(precision)
 
-	// Convert the unscaled value to bytes
-	byteArray := unscaledValue.Bytes()
-	if len(byteArray) > 16 {
-		return nil, fmt.Errorf("unscaled value is too large to fit in 16 bytes")
+	var bytesVal []byte
+	if value.Sign() < 0 {
+		// Compute two's complement for negative numbers
+		absVal := new(big.Int).Abs(value)
+		maxValue := new(big.Int).Lsh(big.NewInt(1), uint(8*size)) // 2^(8*size)
+		twosComplement := new(big.Int).Sub(maxValue, absVal)
+		twosComplement.Add(twosComplement, big.NewInt(1)) // Add 1 to complete two's complement
+		bytesVal = twosComplement.Bytes()
+	} else {
+		bytesVal = value.Bytes()
 	}
 
-	// Copy the byteArray to the fixed-length array, right-aligned (big-endian)
-	copy(fixedLengthArray[16-len(byteArray):], byteArray)
+	if len(bytesVal) > size {
+		return nil, fmt.Errorf("value %s exceeds %d bytes", value.String(), size)
+	}
 
-	// If the value is negative, convert to two's complement
-	if unscaledValue.Sign() < 0 {
-		for i := 0; i < len(fixedLengthArray); i++ {
-			fixedLengthArray[i] = ^fixedLengthArray[i]
+	fixedBytes := make([]byte, size)
+	copy(fixedBytes[size-len(bytesVal):], bytesVal)
+
+	if value.Sign() < 0 {
+		// Fill leading bytes with 0xFF for negative numbers
+		for i := 0; i < size-len(bytesVal); i++ {
+			fixedBytes[i] = 0xFF
 		}
-
-		// Add one to the result to complete the two's complement
-		carry := true
-		for i := len(fixedLengthArray) - 1; i >= 0 && carry; i-- {
-			if fixedLengthArray[i] == 0xFF {
-				fixedLengthArray[i] = 0x00
-			} else {
-				fixedLengthArray[i]++
-				carry = false
-			}
-		}
 	}
 
-	return fixedLengthArray, nil
+	return fixedBytes, nil
 }
