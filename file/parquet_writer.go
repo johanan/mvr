@@ -123,7 +123,7 @@ func convertToParquetDecimal(value any, precision, scale int) (any, error) {
 		return convertToParquetDecimal(float, precision, scale)
 	case *big.Float:
 		// Convert *big.Float to unscaled int
-		unscaledInt := convertBigFloatToUnscaledInt(v, precision)
+		unscaledInt := convertBigFloatToUnscaledInt(v, scale)
 		switch {
 		case precision <= 9:
 			if !unscaledInt.IsInt64() {
@@ -142,6 +142,7 @@ func convertToParquetDecimal(value any, precision, scale int) (any, error) {
 			if err != nil {
 				return nil, err
 			}
+
 			return byteArray, nil
 		}
 
@@ -156,7 +157,7 @@ func convertToParquetDecimal(value any, precision, scale int) (any, error) {
 		} else {
 			// For higher precision, use *big.Float
 			bigFloat := big.NewFloat(v)
-			unscaledInt := convertBigFloatToUnscaledInt(bigFloat, precision)
+			unscaledInt := convertBigFloatToUnscaledInt(bigFloat, scale)
 			byteArray, err := bigIntToFixedBytes(unscaledInt, precision)
 			if err != nil {
 				return nil, err
@@ -182,6 +183,15 @@ func convertToParquetDecimal(value any, precision, scale int) (any, error) {
 			return byteArray, nil
 		}
 
+	case int64:
+		switch {
+		case precision <= 9:
+			return int32(v), nil
+		case precision <= 18:
+			return v, nil
+		default:
+			return nil, fmt.Errorf("unsupported precision %d for int64 DECIMAL conversion", precision)
+		}
 	default:
 		return nil, fmt.Errorf("unsupported type %T for DECIMAL conversion", v)
 	}
@@ -556,7 +566,6 @@ func bigIntToFixedBytes(value *big.Int, precision int) ([]byte, error) {
 		absVal := new(big.Int).Abs(value)
 		maxValue := new(big.Int).Lsh(big.NewInt(1), uint(8*size)) // 2^(8*size)
 		twosComplement := new(big.Int).Sub(maxValue, absVal)
-		twosComplement.Add(twosComplement, big.NewInt(1)) // Add 1 to complete two's complement
 		bytesVal = twosComplement.Bytes()
 	} else {
 		bytesVal = value.Bytes()

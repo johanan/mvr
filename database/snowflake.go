@@ -126,20 +126,9 @@ func sfColumnsToPg(columns []Column) []Column {
 	for i, col := range pgCols {
 		switch col.DatabaseType {
 		case "FIXED":
-			if col.Scale == 0 {
-				switch {
-				case col.Precision <= 4:
-					pgCols[i].DatabaseType = "INT2" // 2 bytes
-				case col.Precision <= 9:
-					pgCols[i].DatabaseType = "INT4" // 4 bytes
-				default:
-					pgCols[i].DatabaseType = "INT8" // 8 bytes
-				}
-			} else {
-				pgCols[i].DatabaseType = "NUMERIC"
-				pgCols[i].Precision = col.Precision
-				pgCols[i].Scale = col.Scale
-			}
+			pgCols[i].DatabaseType = "NUMERIC"
+			pgCols[i].Precision = col.Precision
+			pgCols[i].Scale = col.Scale
 		case "TIMESTAMP_NTZ":
 			pgCols[i].DatabaseType = "TIMESTAMP"
 
