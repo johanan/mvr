@@ -1,6 +1,7 @@
 package file
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"math"
@@ -64,8 +65,12 @@ func (pw *ParquetDataWriter) WriteRow(row []any) error {
 			rowMap[col.Name] = cast.ToInt32(row[i])
 		case "INT8":
 			rowMap[col.Name] = cast.ToInt64(row[i])
-		case "JSONB":
-			rowMap[col.Name] = row[i]
+		case "JSONB", "JSON", "_TEXT":
+			j, err := json.Marshal(row[i])
+			if err != nil {
+				return fmt.Errorf("failed to marshal JSON for column %s: %v", col.Name, err)
+			}
+			rowMap[col.Name] = string(j)
 		case "UUID":
 			switch v := row[i].(type) {
 			case string:

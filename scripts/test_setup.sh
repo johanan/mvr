@@ -39,3 +39,15 @@ docker exec postgres_test psql -U postgres -d postgres -c "TRUNCATE TABLE number
 docker exec postgres_test psql -U postgres -d postgres -c "INSERT INTO numbers (smallint_value, integer_value, bigint_value, decimal_value) VALUES (1, 1, 1, 468797.177024568000000), (2, 2, 2, 191886.800531254000000), (3, 3, 3, 723041.165430700000000);"
 # now insert numbers that push the limits of the types
 docker exec postgres_test psql -U postgres -d postgres -c "INSERT INTO numbers (smallint_value, integer_value, bigint_value, decimal_value) VALUES (32767, 2147483647, 9223372036854775807, 507531.111989867000000);"
+
+docker exec postgres_test psql -U postgres -d postgres -c "CREATE TABLE IF NOT EXISTS strings (
+  char_value CHAR(10) DEFAULT 'a',
+  varchar_value VARCHAR(10) DEFAULT 'a',
+  text_value TEXT DEFAULT 'a',
+  json_value JSON DEFAULT '{}',
+  jsonb_value JSONB DEFAULT '{}',
+  array_value TEXT[] DEFAULT '{}'
+);"
+
+docker exec postgres_test psql -U postgres -d postgres -c "TRUNCATE TABLE strings;"
+docker exec postgres_test psql -U postgres -d postgres -c "INSERT INTO strings (char_value, varchar_value, text_value, json_value, jsonb_value, array_value) VALUES ('a', 'a', 'a', '{}', '{}', '{}'), ('b', 'b', 'b', '{\"key\": \"value\"}', '{\"key\": \"value\"}', '{\"a\"}');"
