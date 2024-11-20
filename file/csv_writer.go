@@ -58,6 +58,12 @@ func (cw *CSVDataWriter) WriteRow(row []any) error {
 				fmt.Printf("Unknown type for NUMERIC: %T\n", v)
 				stringRow[i] = cast.ToString(v)
 			}
+		case "JSON", "JSONB", "_TEXT":
+			j, err := json.Marshal(col)
+			if err != nil {
+				log.Fatalf("Failed to marshal JSON: %v", err)
+			}
+			stringRow[i] = string(j)
 		default:
 			stringRow[i] = cast.ToString(col)
 		}
