@@ -70,7 +70,15 @@ func TestBigIntToFixedBytes(t *testing.T) {
 			decimalStr:  "-123456789012345.123456789012345",
 			scale:       15,
 			precision:   38,
-			expected:    "fffffffe7116f0093c8e183e2e9fa088",
+			expected:    "fffffffe7116f0093c8e183e2e9fa087",
+			expectError: false,
+		},
+		{
+			name:        "Small Negative Number",
+			decimalStr:  "-25.34",
+			scale:       2,
+			precision:   8,
+			expected:    "fffff61a",
 			expectError: false,
 		},
 		{
