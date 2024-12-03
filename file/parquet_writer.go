@@ -100,6 +100,13 @@ func (pw *ParquetDataWriter) WriteRow(row []any) error {
 			// Convert the date to the number of days since the Unix epoch
 			daysSinceEpoch := int32(dateValue.Sub(epochDate).Truncate(24*time.Hour).Hours() / 24)
 			rowMap[col.Name] = daysSinceEpoch
+		case "BOOL":
+			switch v := row[i].(type) {
+			case bool:
+				rowMap[col.Name] = v
+			default:
+				return fmt.Errorf("expected bool for BOOL column %s, got %T", col.Name, row[i])
+			}
 		default:
 			rowMap[col.Name] = row[i]
 		}
@@ -263,6 +270,8 @@ func (r *RootNode) GoType() reflect.Type        { return nil }
 
 func nodeOf(col data.Column) parquet.Node {
 	switch col.DatabaseType {
+	case "BOOL":
+		return optional(parquet.Leaf(parquet.BooleanType), col)
 	case "INT2":
 		return optional(parquet.Int(16), col)
 	case "INT4":

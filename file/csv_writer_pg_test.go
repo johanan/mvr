@@ -5,6 +5,7 @@ import (
 	"context"
 	"log"
 	"net/url"
+	"os"
 	"sync"
 	"testing"
 
@@ -22,11 +23,12 @@ func TestCSVWriter_FromPG(t *testing.T) {
 		{
 			name: "Numbers Test",
 			sql:  "SELECT * FROM public.numbers",
-			expected: `smallint_value,integer_value,bigint_value,decimal_value
-1,1,1,468797.177024568000000
-2,2,2,191886.800531254000000
-3,3,3,723041.165430700000000
-32767,2147483647,9223372036854775807,507531.111989867000000
+			expected: `smallint_value,integer_value,bigint_value,decimal_value,double_value,float_value
+1,1,1,1.000000000000000,1,1
+2,2,2,2.000000000000000,2,2
+3,3,3,3.000000000000000,3,3
+32767,2147483647,9223372036854775807,507531.111989867000000,123456789012345680000,12345679
+0,0,0,468797.177024568000000,1234567890.12345,12345.67
 `,
 		},
 		{
@@ -37,8 +39,16 @@ a         ,a,a,{},{},[]
 b         ,b,b,"{""key"":""value""}","{""key"":""value""}","[""a""]"
 `,
 		},
+		{
+			name: "Default users Table Test",
+			sql:  "SELECT * FROM public.users",
+			expected: `name,created,createdz,unique_id,nullable_id,active
+John Doe,2024-10-08T17:22:00,2024-10-08T17:22:00Z,a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11,NULL,true
+Test Tester,2024-10-08T17:22:00,2024-10-08T17:22:00Z,a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a12,NULL,false
+`,
+		},
 	}
-
+	os.Setenv("TZ", "UTC")
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create a buffer to write the CSV data to
@@ -75,4 +85,5 @@ b         ,b,b,"{""key"":""value""}","{""key"":""value""}","[""a""]"
 			assert.Equal(t, tt.expected, buf.String())
 		})
 	}
+	os.Unsetenv("TZ")
 }

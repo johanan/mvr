@@ -5,6 +5,7 @@ import (
 	"context"
 	"log"
 	"net/url"
+	"os"
 	"sync"
 	"testing"
 
@@ -22,10 +23,11 @@ func TestJsonlWriter_FromPG(t *testing.T) {
 		{
 			name: "Numbers Test",
 			sql:  "SELECT * FROM public.numbers",
-			expected: `{"bigint_value":1,"decimal_value":"468797.177024568","integer_value":1,"smallint_value":1}
-{"bigint_value":2,"decimal_value":"191886.800531254","integer_value":2,"smallint_value":2}
-{"bigint_value":3,"decimal_value":"723041.1654307","integer_value":3,"smallint_value":3}
-{"bigint_value":9223372036854775807,"decimal_value":"507531.111989867","integer_value":2147483647,"smallint_value":32767}
+			expected: `{"bigint_value":1,"decimal_value":"1.000000000000000","double_value":1,"float_value":1,"integer_value":1,"smallint_value":1}
+{"bigint_value":2,"decimal_value":"2.000000000000000","double_value":2,"float_value":2,"integer_value":2,"smallint_value":2}
+{"bigint_value":3,"decimal_value":"3.000000000000000","double_value":3,"float_value":3,"integer_value":3,"smallint_value":3}
+{"bigint_value":9223372036854775807,"decimal_value":"507531.111989867000000","double_value":123456789012345680000,"float_value":12345679,"integer_value":2147483647,"smallint_value":32767}
+{"bigint_value":0,"decimal_value":"468797.177024568000000","double_value":1234567890.12345,"float_value":12345.67,"integer_value":0,"smallint_value":0}
 `,
 		},
 		{
@@ -35,7 +37,15 @@ func TestJsonlWriter_FromPG(t *testing.T) {
 {"array_value":["a"],"char_value":"b         ","json_value":{"key":"value"},"jsonb_value":{"key":"value"},"text_value":"b","varchar_value":"b"}
 `,
 		},
+		{
+			name: "Default users Table Test",
+			sql:  "SELECT * FROM public.users",
+			expected: `{"active":true,"created":"2024-10-08T17:22:00","createdz":"2024-10-08T17:22:00Z","name":"John Doe","nullable_id":null,"unique_id":"a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11"}
+{"active":false,"created":"2024-10-08T17:22:00","createdz":"2024-10-08T17:22:00Z","name":"Test Tester","nullable_id":null,"unique_id":"a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a12"}
+`,
+		},
 	}
+	os.Setenv("TZ", "UTC")
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create a buffer to write the CSV data to
@@ -72,5 +82,5 @@ func TestJsonlWriter_FromPG(t *testing.T) {
 			assert.Equal(t, tt.expected, buf.String())
 		})
 	}
-
+	os.Unsetenv("TZ")
 }

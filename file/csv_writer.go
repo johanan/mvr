@@ -8,6 +8,7 @@ import (
 	"log"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/johanan/mvr/data"
 	"github.com/shopspring/decimal"
@@ -58,6 +59,17 @@ func (cw *CSVDataWriter) WriteRow(row []any) error {
 				fmt.Printf("Unknown type for NUMERIC: %T\n", v)
 				stringRow[i] = cast.ToString(v)
 			}
+		case "UUID":
+			switch v := col.(type) {
+			case [16]uint8:
+				uuidValue, err := uuid.FromBytes(v[:])
+				if err != nil {
+					log.Fatalf("Failed to create UUID from bytes: %v", err)
+				}
+				stringRow[i] = uuidValue.String()
+			default:
+				stringRow[i] = cast.ToString(col)
+			}
 		case "JSON", "JSONB", "_TEXT":
 			j, err := json.Marshal(col)
 			if err != nil {
@@ -84,6 +96,9 @@ func (cw *CSVDataWriter) Close() error {
 func NewCSVDataWriter(datastream *data.DataStream, writer io.Writer) *CSVDataWriter {
 	w := csv.NewWriter(writer)
 	w.Comma = ','
+	if datastream == nil {
+		log.Fatalf("Datastream is nil")
+	}
 	header := make([]string, 0, len(datastream.Columns))
 	for _, col := range datastream.Columns {
 		header = append(header, col.Name)
