@@ -1,9 +1,19 @@
 package file
 
 import (
+	"bytes"
+	"context"
 	"encoding/hex"
+	"io"
+	"log"
+	"net/url"
+	"os"
+	"sync"
 	"testing"
 
+	"github.com/johanan/mvr/data"
+	"github.com/johanan/mvr/database"
+	"github.com/parquet-go/parquet-go"
 	"github.com/shopspring/decimal"
 	"github.com/zeebo/assert"
 )
@@ -262,4 +272,100 @@ func TestConvertDecimalStringToUnscaledInt(t *testing.T) {
 			}
 		})
 	}
+}
+
+type NumbersTest struct {
+	SmallintValue int16           `json:"smallint_value" parquet:"name=smallint_value, type=INT32"`
+	IntegerValue  int32           `json:"integer_value" parquet:"name=integer_value, type=INT32"`
+	BigintValue   int64           `json:"bigint_value" parquet:"name=bigint_value, type=INT64"`
+	DecimalValue  decimal.Decimal `json:"decimal_value" parquet:"name=decimal_value, type=, convertedtype=DECIMAL"`
+	DoubleValue   float64         `json:"double_value" parquet:"name=double_value, type=DOUBLE"`
+	FloatValue    float32         `json:"float_value" parquet:"name=float_value, type=DOUBLE"`
+}
+
+type StringsTest struct {
+	CharValue    string   `json:"char_value" parquet:"name=char_value, type=BYTE_ARRAY, convertedtype=UTF8"`
+	VarcharValue string   `json:"varchar_value" parquet:"name=varchar_value, type=BYTE_ARRAY, convertedtype=UTF8"`
+	TextValue    string   `json:"text_value" parquet:"name=text_value, type=BYTE_ARRAY, convertedtype=UTF8"`
+	JsonValue    string   `json:"json_value" parquet:"name=json_value, type=BYTE_ARRAY, convertedtype=UTF8"`
+	JsonbValue   string   `json:"jsonb_value" parquet:"name=jsonb_value, type=BYTE_ARRAY, convertedtype=UTF8"`
+	ArrayValue   []string `json:"array_value" parquet:"name=array_value, type=LIST"`
+}
+
+func Test_FullRoundTrip_ToPG(t *testing.T) {
+	tests := []struct {
+		name string
+		sql  string
+	}{
+		{
+			name: "Numbers Test",
+			sql:  "SELECT * FROM public.numbers",
+		},
+		{
+			name: "Strings Test",
+			sql:  "SELECT * FROM public.strings",
+		},
+		{
+			name: "Default users Table Test",
+			sql:  "SELECT * FROM public.users",
+		},
+	}
+	os.Setenv("TZ", "UTC")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create a buffer to write the CSV data to
+			var buf bytes.Buffer
+
+			// actually query the database
+			sc := &data.StreamConfig{StreamName: tt.name, Format: "parquet", SQL: tt.sql}
+			local_url, _ := url.Parse(local_db_url)
+
+			pgr, _ := database.NewPGDataReader(local_url)
+			pgDs, _ := pgr.CreateDataStream(local_url, sc)
+			defer pgr.Close()
+
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+
+			rg := sync.WaitGroup{}
+
+			rg.Add(1)
+			go func() {
+				defer rg.Done()
+				if err := pgr.ExecuteDataStream(ctx, pgDs, sc); err != nil {
+					log.Printf("ExecuteDataStream error: %v", err)
+					cancel()
+				}
+			}()
+
+			writer := NewParquetDataWriter(pgDs, &buf)
+
+			rg.Add(1)
+			go pgDs.BatchesToWriter(&rg, writer)
+			rg.Wait()
+			writer.Close()
+
+			readBuf := bytes.NewReader(buf.Bytes())
+			pr := parquet.NewGenericReader[NumbersTest](readBuf)
+
+			_, err := ReadParquetData(pr)
+			assert.NoError(t, err)
+			// going to have to come back to this
+		})
+	}
+	os.Unsetenv("TZ")
+}
+
+// ReadParquetData reads all rows from a Parquet reader into a slice of structs.
+func ReadParquetData[T any](pr *parquet.GenericReader[T]) ([]T, error) {
+	n := pr.NumRows()
+	rows := make([]T, n)
+	_, err := pr.Read(rows)
+	if err != nil {
+		if err == io.EOF {
+			return rows, nil
+		}
+		return nil, err
+	}
+	return rows, nil
 }

@@ -5,7 +5,9 @@ import (
 	"io"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/johanan/mvr/data"
+	"github.com/shopspring/decimal"
 )
 
 type JSONLWriter struct {
@@ -22,6 +24,24 @@ func (w *JSONLWriter) WriteRow(row []any) error {
 			if t, ok := row[i].(time.Time); ok {
 				jsonObject[col.Name] = t.Format(data.RFC3339NanoNoTZ)
 			} else {
+				jsonObject[col.Name] = row[i]
+			}
+		case "UUID":
+			switch v := row[i].(type) {
+			case [16]uint8:
+				uuidValue, err := uuid.FromBytes(v[:])
+				if err != nil {
+					return err
+				}
+				jsonObject[col.Name] = uuidValue.String()
+			default:
+				jsonObject[col.Name] = row[i]
+			}
+		case "NUMERIC":
+			switch v := row[i].(type) {
+			case decimal.Decimal:
+				jsonObject[col.Name] = v.StringFixed(int32(col.Scale))
+			default:
 				jsonObject[col.Name] = row[i]
 			}
 		default:
