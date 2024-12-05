@@ -1,0 +1,146 @@
+package database
+
+import (
+	"context"
+	"fmt"
+	"net/url"
+
+	"github.com/jmoiron/sqlx"
+	"github.com/johanan/mvr/data"
+	_ "github.com/microsoft/go-mssqldb"
+)
+
+type MSDataReader struct {
+	Conn    *sqlx.DB
+	FixUUID bool
+}
+
+func NewMSDataReader(connUrl *url.URL) (*MSDataReader, error) {
+	connString := connUrl.String()
+	db, err := sqlx.Open("sqlserver", connString)
+	if err != nil {
+		return nil, err
+	}
+
+	return &MSDataReader{Conn: db, FixUUID: connUrl.Query().Get("FixUUID") == "true"}, nil
+}
+
+func (reader *MSDataReader) Close() error {
+	return reader.Conn.Close()
+}
+
+func (reader *MSDataReader) CreateDataStream(connUrl *url.URL, config *data.StreamConfig) (*DataStream, error) {
+	col_query := "SELECT * FROM (" + config.SQL + ") as sub ORDER BY (SELECT NULL) OFFSET 0 ROWS FETCH NEXT 1 ROWS ONLY"
+
+	rows, err := reader.Conn.NamedQuery(col_query, config.Params)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	dbCols, err := rows.ColumnTypes()
+	if err != nil {
+		return nil, err
+	}
+
+	columns := MapToMvrColumns(dbCols)
+	destColumns := msColumnsToPg(columns)
+
+	if len(config.Columns) > 0 {
+		destColumns = data.OverrideColumns(destColumns, config.Columns)
+	}
+
+	batchChan := make(chan Batch, 10)
+
+	return &DataStream{TotalRows: 0, BatchChan: batchChan, BatchSize: 1000, Columns: columns, DestColumns: destColumns, IsSqlServer: true}, nil
+}
+
+func (reader *MSDataReader) ExecuteDataStream(ctx context.Context, ds *DataStream, config *data.StreamConfig) error {
+	rows, err := reader.Conn.NamedQueryContext(ctx, config.SQL, config.Params)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	batch := Batch{Rows: make([][]any, 0, ds.BatchSize)}
+
+	for rows.Next() {
+		row := make([]any, len(ds.Columns))
+		rowPtrs := make([]any, len(ds.Columns))
+		for i := range row {
+			rowPtrs[i] = &row[i]
+		}
+		if err := rows.Scan(rowPtrs...); err != nil {
+			return fmt.Errorf("failed to scan row: %w", err)
+		}
+
+		// fix MS SQL Server wrong endianness for UUID
+		for i, col := range ds.DestColumns {
+			if col.DatabaseType == "UUID" && reader.FixUUID {
+				// null is fine, do not try to convert
+				if row[i] == nil {
+					continue
+				}
+				if byteData, ok := row[i].([]byte); ok && len(byteData) == 16 {
+					convertedUUID := data.ConvertSQLServerUUID(byteData)
+					row[i] = convertedUUID
+				}
+			}
+		}
+
+		batch.Rows = append(batch.Rows, row)
+
+		if len(batch.Rows) >= ds.BatchSize {
+			select {
+			case ds.BatchChan <- batch:
+				batch = data.Batch{Rows: make([][]any, 0, ds.BatchSize)}
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+	}
+
+	// Send any remaining rows
+	if len(batch.Rows) > 0 {
+		select {
+		case ds.BatchChan <- batch:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+
+	close(ds.BatchChan)
+
+	return nil
+}
+
+func msColumnsToPg(columns []Column) []Column {
+	pgCols := make([]Column, len(columns))
+	copy(pgCols, columns)
+	for i, col := range pgCols {
+		switch col.DatabaseType {
+		case "DECIMAL":
+			pgCols[i].DatabaseType = "NUMERIC"
+			pgCols[i].Precision = col.Precision
+			pgCols[i].Scale = col.Scale
+		case "SMALLINT":
+			pgCols[i].DatabaseType = "INT2"
+		case "INT":
+			pgCols[i].DatabaseType = "INT4"
+		case "BIGINT":
+			pgCols[i].DatabaseType = "INT8"
+		case "REAL":
+			pgCols[i].DatabaseType = "FLOAT4"
+		case "FLOAT":
+			pgCols[i].DatabaseType = "FLOAT8"
+		case "DATETIMEOFFSET":
+			pgCols[i].DatabaseType = "TIMESTAMPTZ"
+		case "DATETIME":
+			pgCols[i].DatabaseType = "TIMESTAMP"
+		case "UNIQUEIDENTIFIER":
+			pgCols[i].DatabaseType = "UUID"
+		}
+
+	}
+	return pgCols
+}

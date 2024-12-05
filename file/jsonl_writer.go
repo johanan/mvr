@@ -2,6 +2,7 @@ package file
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"time"
 
@@ -34,6 +35,12 @@ func (w *JSONLWriter) WriteRow(row []any) error {
 					return err
 				}
 				jsonObject[col.Name] = uuidValue.String()
+			case []uint8:
+				uuidValue, err := uuid.FromBytes(v[:])
+				if err != nil {
+					return err
+				}
+				jsonObject[col.Name] = uuidValue.String()
 			default:
 				jsonObject[col.Name] = row[i]
 			}
@@ -41,6 +48,19 @@ func (w *JSONLWriter) WriteRow(row []any) error {
 			switch v := row[i].(type) {
 			case decimal.Decimal:
 				jsonObject[col.Name] = v.StringFixed(int32(col.Scale))
+			case []uint8:
+				jsonObject[col.Name] = string(v)
+			default:
+				jsonObject[col.Name] = row[i]
+			}
+		case "JSON":
+			switch v := row[i].(type) {
+			case string:
+				var u interface{}
+				if err := json.Unmarshal([]byte(v), &u); err != nil {
+					return fmt.Errorf("failed to unmarshal JSON: %v", err)
+				}
+				jsonObject[col.Name] = u
 			default:
 				jsonObject[col.Name] = row[i]
 			}

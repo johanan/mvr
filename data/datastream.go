@@ -44,6 +44,7 @@ type DataStream struct {
 	BatchSize   int
 	Columns     []Column
 	DestColumns []Column
+	IsSqlServer bool
 }
 
 type DataWriter interface {

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"log"
+	"net/url"
 	"os"
 	"runtime"
 	"sync"
@@ -79,19 +80,30 @@ func SetupMv(sConfig *data.StreamConfig) (*Task, error) {
 	return NewTask(*execConfig), nil
 }
 
-func RunMv(task *Task) error {
-	source := task.ExecConfig.Config.SourceConn.ParsedUrl.Scheme
+func BuildDBReader(connURL *url.URL) (data.DBReaderConn, error) {
+	source := connURL.Scheme
 	var reader data.DBReaderConn
 	var err error
 
 	switch source {
 	case "postgres":
-		reader, err = database.NewPGDataReader(task.ExecConfig.Config.SourceConn.ParsedUrl)
+		reader, err = database.NewPGDataReader(connURL)
+	case "sqlserver":
+		reader, err = database.NewMSDataReader(connURL)
 	case "snowflake":
-		reader, err = database.NewSnowflakeDataReader(task.ExecConfig.Config.SourceConn.ParsedUrl)
+		reader, err = database.NewSnowflakeDataReader(connURL)
 	default:
 		log.Fatalf("Unsupported source: %s", source)
 	}
+	if err != nil {
+		return nil, err
+	}
+	return reader, nil
+}
+
+func RunMv(task *Task) error {
+	source := task.ExecConfig.Config.SourceConn.ParsedUrl
+	reader, err := BuildDBReader(source)
 	if err != nil {
 		return err
 	}
