@@ -82,7 +82,7 @@ func (pool *PGDataReader) CreateDataStream(connUrl *url.URL, config *data.Stream
 
 	batchChan := make(chan Batch, 10)
 
-	return &DataStream{TotalRows: 0, BatchChan: batchChan, BatchSize: 1000, Columns: columns, DestColumns: destColumns}, nil
+	return &DataStream{TotalRows: 0, BatchChan: batchChan, BatchSize: 1000, Columns: columns, DestColumns: destColumns, IsSqlServer: false}, nil
 
 }
 

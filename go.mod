@@ -8,6 +8,7 @@ require (
 	github.com/jackc/pgx-shopspring-decimal v0.0.0-20220624020537-1d36b5a1853e
 	github.com/jackc/pgx/v5 v5.7.1
 	github.com/jmoiron/sqlx v1.4.0
+	github.com/microsoft/go-mssqldb v1.7.2
 	github.com/parquet-go/parquet-go v0.23.0
 	github.com/shopspring/decimal v1.4.0
 	github.com/snowflakedb/gosnowflake v1.11.2
@@ -48,6 +49,8 @@ require (
 	github.com/goccy/go-json v0.10.3 // indirect
 	github.com/godbus/dbus v0.0.0-20190726142602-4481cbc300e2 // indirect
 	github.com/golang-jwt/jwt/v5 v5.2.1 // indirect
+	github.com/golang-sql/civil v0.0.0-20220223132316-b832511892a9 // indirect
+	github.com/golang-sql/sqlexp v0.1.0 // indirect
 	github.com/google/flatbuffers v24.3.25+incompatible // indirect
 	github.com/gsterjov/go-libsecret v0.0.0-20161001094733-a6f4afe4910c // indirect
 	github.com/huandu/xstrings v1.5.0 // indirect

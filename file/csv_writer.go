@@ -67,11 +67,28 @@ func (cw *CSVDataWriter) WriteRow(row []any) error {
 					log.Fatalf("Failed to create UUID from bytes: %v", err)
 				}
 				stringRow[i] = uuidValue.String()
+			case []uint8:
+				// Handle slice type
+				uuidValue, err := uuid.FromBytes(v)
+				if err != nil {
+					log.Fatalf("Failed to create UUID from []uint8: %v", err)
+				}
+				stringRow[i] = uuidValue.String()
 			default:
 				stringRow[i] = cast.ToString(col)
 			}
 		case "JSON", "JSONB", "_TEXT":
-			j, err := json.Marshal(col)
+			// if this is a string unmarshall first then remarshal
+			var u interface{}
+			if v, ok := col.(string); ok {
+				if err := json.Unmarshal([]byte(v), &u); err != nil {
+					log.Fatalf("Failed to unmarshal JSON: %v", err)
+				}
+			} else {
+				u = col
+			}
+
+			j, err := json.Marshal(u)
 			if err != nil {
 				log.Fatalf("Failed to marshal JSON: %v", err)
 			}
