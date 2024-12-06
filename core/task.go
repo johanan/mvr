@@ -205,6 +205,8 @@ func (w nopWriteCloser) Close() error {
 }
 
 func execute(task *Task, datastream *data.DataStream, reader data.DBReaderConn, writer data.DataWriter) {
+	defer reader.Close()
+
 	var readWg = task.ExecConfig.ReaderWg
 	var writeWg = task.ExecConfig.WriterWg
 
