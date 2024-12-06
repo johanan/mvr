@@ -11,8 +11,8 @@ import (
 )
 
 type MSDataReader struct {
-	Conn    *sqlx.DB
-	FixUUID bool
+	Conn             *sqlx.DB
+	KeepOriginalUUID bool
 }
 
 func NewMSDataReader(connUrl *url.URL) (*MSDataReader, error) {
@@ -21,8 +21,8 @@ func NewMSDataReader(connUrl *url.URL) (*MSDataReader, error) {
 	if err != nil {
 		return nil, err
 	}
-
-	return &MSDataReader{Conn: db, FixUUID: connUrl.Query().Get("FixUUID") == "true"}, nil
+	keepUUID := connUrl.Query().Get("KeepOriginalUUID") == "true"
+	return &MSDataReader{Conn: db, KeepOriginalUUID: keepUUID}, nil
 }
 
 func (reader *MSDataReader) Close() error {
@@ -76,7 +76,7 @@ func (reader *MSDataReader) ExecuteDataStream(ctx context.Context, ds *DataStrea
 
 		// fix MS SQL Server wrong endianness for UUID
 		for i, col := range ds.DestColumns {
-			if col.DatabaseType == "UUID" && reader.FixUUID {
+			if !reader.KeepOriginalUUID && col.DatabaseType == "UUID" {
 				// null is fine, do not try to convert
 				if row[i] == nil {
 					continue
