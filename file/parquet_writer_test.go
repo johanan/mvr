@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
-	"io"
 	"log"
 	"net/url"
 	"os"
@@ -13,7 +12,6 @@ import (
 
 	"github.com/johanan/mvr/data"
 	"github.com/johanan/mvr/database"
-	"github.com/parquet-go/parquet-go"
 	"github.com/shopspring/decimal"
 	"github.com/zeebo/assert"
 )
@@ -345,27 +343,8 @@ func Test_FullRoundTrip_ToPG(t *testing.T) {
 			rg.Wait()
 			writer.Close()
 
-			readBuf := bytes.NewReader(buf.Bytes())
-			pr := parquet.NewGenericReader[NumbersTest](readBuf)
-
-			_, err := ReadParquetData(pr)
-			assert.NoError(t, err)
 			// going to have to come back to this
 		})
 	}
 	os.Unsetenv("TZ")
-}
-
-// ReadParquetData reads all rows from a Parquet reader into a slice of structs.
-func ReadParquetData[T any](pr *parquet.GenericReader[T]) ([]T, error) {
-	n := pr.NumRows()
-	rows := make([]T, n)
-	_, err := pr.Read(rows)
-	if err != nil {
-		if err == io.EOF {
-			return rows, nil
-		}
-		return nil, err
-	}
-	return rows, nil
 }
