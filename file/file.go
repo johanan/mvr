@@ -32,6 +32,12 @@ func GetIo(parsed *url.URL, config *data.StreamConfig) (io *bufio.Writer, err er
 			return nil, fmt.Errorf("error creating directory: %s", err)
 		}
 
+		if _, err := os.Stat(filePath); err == nil {
+			if err := os.Remove(filePath); err != nil {
+				return nil, fmt.Errorf("error removing file: %s", err)
+			}
+		}
+
 		file, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 		if err != nil {
 			return nil, fmt.Errorf("failed to open file %s: %v", filePath, err)
