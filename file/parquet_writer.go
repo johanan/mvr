@@ -103,7 +103,7 @@ func NewParquetDataWriter(datastream *data.DataStream, ioWriter io.Writer) *Parq
 
 	for i := 0; i < columnCount; i++ {
 		mapped := checkType(datastream.DestColumns[i])
-		columnBuffers[i] = reflect.MakeSlice(reflect.SliceOf(mapped.GoType), maxRows, maxRows).Interface()
+		columnBuffers[i] = reflect.MakeSlice(reflect.SliceOf(mapped.GoType), 0, maxRows).Interface()
 		definitionLevels[i] = make([]int16, maxRows)
 	}
 
@@ -143,31 +143,31 @@ func (pw *ParquetDataWriter) WriteRow(row []any) error {
 			if !ok {
 				return fmt.Errorf("type assertion failed for INT2")
 			}
-			buf[pw.rowCount] = cast.ToInt32(row[i])
+			pw.columnBuffers[i] = append(buf, cast.ToInt32(row[i]))
 		case "INT4":
 			buf, ok := pw.columnBuffers[i].([]int32)
 			if !ok {
 				return fmt.Errorf("type assertion failed for INT4")
 			}
-			buf[pw.rowCount] = cast.ToInt32(row[i])
+			pw.columnBuffers[i] = append(buf, cast.ToInt32(row[i]))
 		case "INT8":
 			buf, ok := pw.columnBuffers[i].([]int64)
 			if !ok {
 				return fmt.Errorf("type assertion failed for INT8")
 			}
-			buf[pw.rowCount] = cast.ToInt64(row[i])
+			pw.columnBuffers[i] = append(buf, cast.ToInt64(row[i]))
 		case "FLOAT4":
 			buf, ok := pw.columnBuffers[i].([]float32)
 			if !ok {
 				return fmt.Errorf("type assertion failed for FLOAT4")
 			}
-			buf[pw.rowCount] = cast.ToFloat32(row[i])
+			pw.columnBuffers[i] = append(buf, cast.ToFloat32(row[i]))
 		case "FLOAT8":
 			buf, ok := pw.columnBuffers[i].([]float64)
 			if !ok {
 				return fmt.Errorf("type assertion failed for FLOAT8")
 			}
-			buf[pw.rowCount] = cast.ToFloat64(row[i])
+			pw.columnBuffers[i] = append(buf, cast.ToFloat64(row[i]))
 		case "JSONB", "JSON", "_TEXT":
 			buf, ok := pw.columnBuffers[i].([]string)
 			if !ok {
@@ -177,7 +177,7 @@ func (pw *ParquetDataWriter) WriteRow(row []any) error {
 			if err != nil {
 				return fmt.Errorf("failed to marshal JSON for column %s: %v", col.Name, err)
 			}
-			buf[pw.rowCount] = string(j)
+			pw.columnBuffers[i] = append(buf, string(j))
 		case "UUID":
 			buf, ok := pw.columnBuffers[i].([][]byte)
 			if !ok {
@@ -190,11 +190,11 @@ func (pw *ParquetDataWriter) WriteRow(row []any) error {
 				if err != nil {
 					return fmt.Errorf("failed to parse UUID for column %s: %v", col.Name, err)
 				}
-				buf[pw.rowCount] = uuidValue[:]
+				pw.columnBuffers[i] = append(buf, uuidValue[:])
 			case [16]uint8:
-				buf[pw.rowCount] = v[:]
+				pw.columnBuffers[i] = append(buf, v[:])
 			case uuid.UUID:
-				buf[pw.rowCount] = v[:]
+				pw.columnBuffers[i] = append(buf, v[:])
 			default:
 				return fmt.Errorf("expected string or UUID for UUID column %s, got %T", col.Name, v)
 			}
@@ -209,19 +209,19 @@ func (pw *ParquetDataWriter) WriteRow(row []any) error {
 				if !ok {
 					return fmt.Errorf("type assertion failed for DECIMAL")
 				}
-				buf[pw.rowCount] = decimalValue.Int32Val
+				pw.columnBuffers[i] = append(buf, decimalValue.Int32Val)
 			case Int64Decimal:
 				buf, ok := pw.columnBuffers[i].([]int64)
 				if !ok {
 					return fmt.Errorf("type assertion failed for DECIMAL")
 				}
-				buf[pw.rowCount] = decimalValue.Int64Val
+				pw.columnBuffers[i] = append(buf, decimalValue.Int64Val)
 			case ByteArrayDecimal:
 				buf, ok := pw.columnBuffers[i].([][]byte)
 				if !ok {
 					return fmt.Errorf("type assertion failed for DECIMAL")
 				}
-				buf[pw.rowCount] = decimalValue.ByteArrayVal
+				pw.columnBuffers[i] = append(buf, decimalValue.ByteArrayVal)
 			default:
 				return fmt.Errorf("unknown DECIMAL type %v", decimalValue.Type)
 			}
@@ -236,7 +236,7 @@ func (pw *ParquetDataWriter) WriteRow(row []any) error {
 			}
 			// Convert the date to the number of days since the Unix epoch
 			daysSinceEpoch := int32(dateValue.Sub(epochDate).Truncate(24*time.Hour).Hours() / 24)
-			buf[pw.rowCount] = daysSinceEpoch
+			pw.columnBuffers[i] = append(buf, daysSinceEpoch)
 		case "BOOL":
 			buf, ok := pw.columnBuffers[i].([]bool)
 			if !ok {
@@ -244,7 +244,7 @@ func (pw *ParquetDataWriter) WriteRow(row []any) error {
 			}
 			switch v := row[i].(type) {
 			case bool:
-				buf[pw.rowCount] = v
+				pw.columnBuffers[i] = append(buf, v)
 			default:
 				return fmt.Errorf("expected bool for BOOL column %s, got %T", col.Name, row[i])
 			}
@@ -257,14 +257,14 @@ func (pw *ParquetDataWriter) WriteRow(row []any) error {
 			if !ok {
 				return fmt.Errorf("expected time.Time for TIMESTAMP column %s, got %T", col.Name, row[i])
 			}
-			buf[pw.rowCount] = v.UnixNano()
+			pw.columnBuffers[i] = append(buf, v.UnixNano())
 		default:
 			// cast everything else to string
 			buf, ok := pw.columnBuffers[i].([]string)
 			if !ok {
 				return fmt.Errorf("type assertion failed for default")
 			}
-			buf[pw.rowCount] = cast.ToString(row[i])
+			pw.columnBuffers[i] = append(buf, cast.ToString(row[i]))
 		}
 	}
 
@@ -279,7 +279,7 @@ func (pw *ParquetDataWriter) WriteRow(row []any) error {
 		pw.rowCount = 0
 		for i := range pw.datastream.DestColumns {
 			mapped := checkType(pw.datastream.DestColumns[i])
-			pw.columnBuffers[i] = reflect.MakeSlice(reflect.SliceOf(mapped.GoType), 100, 100).Interface()
+			pw.columnBuffers[i] = reflect.MakeSlice(reflect.SliceOf(mapped.GoType), 0, 100).Interface()
 			pw.definitionLevels[i] = make([]int16, 100)
 		}
 	}
@@ -297,7 +297,7 @@ func (pw *ParquetDataWriter) Flush() error {
 		pw.rowCount = 0
 		for i := range pw.datastream.DestColumns {
 			mapped := checkType(pw.datastream.DestColumns[i])
-			pw.columnBuffers[i] = reflect.MakeSlice(reflect.SliceOf(mapped.GoType), 100, 100).Interface()
+			pw.columnBuffers[i] = reflect.MakeSlice(reflect.SliceOf(mapped.GoType), 0, 100).Interface()
 			pw.definitionLevels[i] = make([]int16, 100)
 		}
 	}
@@ -305,6 +305,7 @@ func (pw *ParquetDataWriter) Flush() error {
 }
 
 func (pw *ParquetDataWriter) Close() error {
+	pw.writer.FlushWithFooter()
 	return pw.writer.Close()
 }
 
@@ -323,7 +324,7 @@ func (pw *ParquetDataWriter) writeBatch() error {
 			if !ok {
 				return fmt.Errorf("type assertion failed for INT4")
 			}
-			_, err := chunker.WriteBatch(buf[:pw.rowCount], pw.definitionLevels[i][:pw.rowCount], nil)
+			_, err := chunker.WriteBatch(buf, pw.definitionLevels[i][:pw.rowCount], nil)
 			if err != nil {
 				return err
 			}
@@ -332,7 +333,7 @@ func (pw *ParquetDataWriter) writeBatch() error {
 			if !ok {
 				return fmt.Errorf("type assertion failed for INT8 writer")
 			}
-			_, err := chunker.WriteBatch(buf[:pw.rowCount], pw.definitionLevels[i][:pw.rowCount], nil)
+			_, err := chunker.WriteBatch(buf, pw.definitionLevels[i][:pw.rowCount], nil)
 			if err != nil {
 				return err
 			}
@@ -341,7 +342,7 @@ func (pw *ParquetDataWriter) writeBatch() error {
 			if !ok {
 				return fmt.Errorf("type assertion failed for FLOAT4")
 			}
-			_, err := chunker.WriteBatch(buf[:pw.rowCount], pw.definitionLevels[i][:pw.rowCount], nil)
+			_, err := chunker.WriteBatch(buf, pw.definitionLevels[i][:pw.rowCount], nil)
 			if err != nil {
 				return err
 			}
@@ -350,7 +351,7 @@ func (pw *ParquetDataWriter) writeBatch() error {
 			if !ok {
 				return fmt.Errorf("type assertion failed for FLOAT8")
 			}
-			_, err := chunker.WriteBatch(buf[:pw.rowCount], pw.definitionLevels[i][:pw.rowCount], nil)
+			_, err := chunker.WriteBatch(buf, pw.definitionLevels[i][:pw.rowCount], nil)
 			if err != nil {
 				return err
 			}
@@ -359,11 +360,11 @@ func (pw *ParquetDataWriter) writeBatch() error {
 			if !ok {
 				return fmt.Errorf("type assertion failed for BYTE_ARRAY")
 			}
-			byteArray := make([]parquet.ByteArray, pw.rowCount)
-			for j := 0; j < pw.rowCount; j++ {
+			byteArray := make([]parquet.ByteArray, len(buf))
+			for j := 0; j < len(buf); j++ {
 				byteArray[j] = parquet.ByteArray(buf[j])
 			}
-			_, err := chunker.WriteBatch(byteArray[:pw.rowCount], pw.definitionLevels[i][:pw.rowCount], nil)
+			_, err := chunker.WriteBatch(byteArray, pw.definitionLevels[i][:pw.rowCount], nil)
 			if err != nil {
 				return err
 			}
@@ -373,11 +374,11 @@ func (pw *ParquetDataWriter) writeBatch() error {
 				return fmt.Errorf("type assertion failed for FIXED_LEN_BYTE_ARRAY")
 			}
 			// loop over and set as parquet.FixedLenByteArray
-			fixedLenByteArray := make([]parquet.FixedLenByteArray, pw.rowCount)
-			for j := 0; j < pw.rowCount; j++ {
+			fixedLenByteArray := make([]parquet.FixedLenByteArray, len(buf))
+			for j := 0; j < len(buf); j++ {
 				fixedLenByteArray[j] = parquet.FixedLenByteArray(buf[j])
 			}
-			_, err := chunker.WriteBatch(fixedLenByteArray[:pw.rowCount], pw.definitionLevels[i][:pw.rowCount], nil)
+			_, err := chunker.WriteBatch(fixedLenByteArray, pw.definitionLevels[i][:pw.rowCount], nil)
 			if err != nil {
 				return err
 			}
@@ -386,7 +387,7 @@ func (pw *ParquetDataWriter) writeBatch() error {
 			if !ok {
 				return fmt.Errorf("type assertion failed for BOOLEAN")
 			}
-			_, err := chunker.WriteBatch(buf[:pw.rowCount], pw.definitionLevels[i][:pw.rowCount], nil)
+			_, err := chunker.WriteBatch(buf, pw.definitionLevels[i][:pw.rowCount], nil)
 			if err != nil {
 				return err
 			}
@@ -473,7 +474,12 @@ func convertToParquetDecimal(value any, precision, scale int) (ParquetDecimal, e
 		case precision <= 18:
 			return ParquetDecimal{Type: Int64Decimal, Int64Val: v}, nil
 		default:
-			return result, fmt.Errorf("unsupported precision %d for int64 DECIMAL conversion", precision)
+			unscaledInt := big.NewInt(v)
+			byteArray, err := bigIntToFixedBytes(unscaledInt, precision)
+			if err != nil {
+				return result, err
+			}
+			return ParquetDecimal{Type: ByteArrayDecimal, ByteArrayVal: byteArray}, nil
 		}
 	default:
 		return result, fmt.Errorf("unsupported type %T for DECIMAL conversion", v)

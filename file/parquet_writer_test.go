@@ -10,6 +10,8 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/apache/arrow/go/v18/parquet"
+	"github.com/apache/arrow/go/v18/parquet/file"
 	"github.com/johanan/mvr/data"
 	"github.com/johanan/mvr/database"
 	"github.com/shopspring/decimal"
@@ -272,24 +274,6 @@ func TestConvertDecimalStringToUnscaledInt(t *testing.T) {
 	}
 }
 
-type NumbersTest struct {
-	SmallintValue int16           `json:"smallint_value" parquet:"name=smallint_value, type=INT32"`
-	IntegerValue  int32           `json:"integer_value" parquet:"name=integer_value, type=INT32"`
-	BigintValue   int64           `json:"bigint_value" parquet:"name=bigint_value, type=INT64"`
-	DecimalValue  decimal.Decimal `json:"decimal_value" parquet:"name=decimal_value, type=, convertedtype=DECIMAL"`
-	DoubleValue   float64         `json:"double_value" parquet:"name=double_value, type=DOUBLE"`
-	FloatValue    float32         `json:"float_value" parquet:"name=float_value, type=DOUBLE"`
-}
-
-type StringsTest struct {
-	CharValue    string   `json:"char_value" parquet:"name=char_value, type=BYTE_ARRAY, convertedtype=UTF8"`
-	VarcharValue string   `json:"varchar_value" parquet:"name=varchar_value, type=BYTE_ARRAY, convertedtype=UTF8"`
-	TextValue    string   `json:"text_value" parquet:"name=text_value, type=BYTE_ARRAY, convertedtype=UTF8"`
-	JsonValue    string   `json:"json_value" parquet:"name=json_value, type=BYTE_ARRAY, convertedtype=UTF8"`
-	JsonbValue   string   `json:"jsonb_value" parquet:"name=jsonb_value, type=BYTE_ARRAY, convertedtype=UTF8"`
-	ArrayValue   []string `json:"array_value" parquet:"name=array_value, type=LIST"`
-}
-
 func Test_FullRoundTrip_ToPG(t *testing.T) {
 	tests := []struct {
 		name string
@@ -347,4 +331,79 @@ func Test_FullRoundTrip_ToPG(t *testing.T) {
 		})
 	}
 	os.Unsetenv("TZ")
+}
+
+func TestParquetWriter(t *testing.T) {
+	var buf bytes.Buffer
+
+	batchChan := make(chan data.Batch, 10)
+	ds := &data.DataStream{
+		BatchChan: batchChan,
+		BatchSize: 10,
+		Mux:       sync.Mutex{},
+		DestColumns: []data.Column{
+			{Name: "id", DatabaseType: "INT8"},
+			{Name: "name", DatabaseType: "TEXT"},
+		},
+	}
+
+	pdw := NewParquetDataWriter(ds, &buf)
+
+	rows := [][]any{
+		{int64(1), "Alice"},
+		{int64(2), "Bob"},
+		{int64(3), nil},
+		{int64(4), "Charlie"},
+		{int64(5), nil},
+	}
+
+	batch := data.Batch{Rows: rows}
+	batchChan <- batch
+	close(batchChan)
+
+	rg := sync.WaitGroup{}
+	rg.Add(1)
+	go ds.BatchesToWriter(&rg, pdw)
+	rg.Wait()
+
+	pdw.Close()
+
+	reader, err := file.NewParquetReader(bytes.NewReader(buf.Bytes()), file.WithReadProps(parquet.NewReaderProperties(nil)))
+	assert.NoError(t, err)
+
+	metadata := reader.MetaData()
+	assert.NotNil(t, metadata)
+	assert.Equal(t, 2, metadata.Schema.NumColumns())
+	assert.Equal(t, 5, metadata.FileMetaData.NumRows)
+
+	cols := metadata.Schema.NumColumns()
+
+	for r := 0; r < reader.NumRowGroups(); r++ {
+		rgr := reader.RowGroup(r)
+		rgMeta := rgr.MetaData()
+		for c := 0; c < cols; c++ {
+			var valueBuffer interface{}
+			defLevels := make([]int16, rgMeta.NumRows())
+			chunkMeta, _ := rgMeta.ColumnChunk(c)
+			column, _ := rgr.Column(c)
+			stats, _ := chunkMeta.Statistics()
+			switch r := column.(type) {
+			case *file.Int64ColumnChunkReader:
+				valueBuffer = make([]int64, stats.NumValues())
+				values := valueBuffer.([]int64)
+				r.ReadBatch(5, values, defLevels, nil)
+				assert.Equal(t, []int64{1, 2, 3, 4, 5}, values)
+				assert.Equal(t, []int16{1, 1, 1, 1, 1}, defLevels)
+			case *file.ByteArrayColumnChunkReader:
+				valueBuffer = make([]parquet.ByteArray, stats.NumValues())
+				values := valueBuffer.([]parquet.ByteArray)
+				r.ReadBatch(5, values, defLevels, nil)
+				assert.Equal(t, 3, len(values))
+				assert.Equal(t, "Alice", string(values[0]))
+				assert.Equal(t, []int16{1, 1, 0, 1, 0}, defLevels)
+			}
+		}
+
+	}
+
 }
