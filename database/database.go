@@ -4,6 +4,7 @@ import (
 	"database/sql"
 
 	"github.com/johanan/mvr/data"
+	"github.com/spf13/cast"
 )
 
 type Column = data.Column
@@ -29,4 +30,21 @@ func MapToMvrColumns(columns []*sql.ColumnType) []Column {
 	}
 
 	return cols
+}
+
+func BuildParams(config *data.StreamConfig) []interface{} {
+	sqlParams := make([]interface{}, 0, len(config.ParamKeys))
+	for _, key := range config.ParamKeys {
+		pv := config.Params[key]
+		switch pv.Type {
+		case "TEXT", "":
+			sqlParams = append(sqlParams, pv.Value)
+		case "INT2", "INT4", "INT8":
+			sqlParams = append(sqlParams, cast.ToInt64(pv.Value))
+		case "BOOLEAN":
+			sqlParams = append(sqlParams, cast.ToBool(pv.Value))
+		}
+
+	}
+	return sqlParams
 }

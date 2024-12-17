@@ -107,6 +107,7 @@ func RunMv(task *Task) error {
 	if err != nil {
 		return err
 	}
+	defer reader.Close()
 
 	datastream, err := reader.CreateDataStream(task.ExecConfig.Config.SourceConn.ParsedUrl, task.ExecConfig.Config.StreamConfig)
 	if err != nil {

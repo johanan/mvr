@@ -10,7 +10,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jackc/pgx/v5/stdlib"
-	"github.com/jmoiron/sqlx"
 	"github.com/johanan/mvr/data"
 )
 
@@ -53,16 +52,16 @@ func (pool *PGDataReader) Close() error {
 }
 
 func (pool *PGDataReader) CreateDataStream(connUrl *url.URL, config *data.StreamConfig) (ds *DataStream, err error) {
-	// switch to sqlx to get the columns
+	// switch to sql to get the columns
 	// this will use the code from pqx stdlib to map columns to a common interface
 	// we can also use pqx for querying the actual data
 	db := stdlib.OpenDBFromPool(pool.Pool)
-	dbx := sqlx.NewDb(db, "pgx")
 
 	// let's get the columns
 	col_query := "SELECT * FROM (" + config.SQL + ") LIMIT 0 OFFSET 0"
 
-	rows, err := dbx.NamedQuery(col_query, config.Params)
+	paramValues := BuildParams(config)
+	rows, err := db.QueryContext(context.Background(), col_query, paramValues...)
 	if err != nil {
 		return nil, err
 	}
@@ -82,12 +81,13 @@ func (pool *PGDataReader) CreateDataStream(connUrl *url.URL, config *data.Stream
 
 	batchChan := make(chan Batch, 10)
 
-	return &DataStream{TotalRows: 0, BatchChan: batchChan, BatchSize: 1000, Columns: columns, DestColumns: destColumns, IsSqlServer: false}, nil
+	return &DataStream{TotalRows: 0, BatchChan: batchChan, BatchSize: 1000, Columns: columns, DestColumns: destColumns}, nil
 
 }
 
 func (pool *PGDataReader) ExecuteDataStream(ctx context.Context, ds *DataStream, config *data.StreamConfig) error {
-	rows, err := pool.Pool.Query(ctx, config.SQL, pgx.NamedArgs(config.Params))
+	paramValues := BuildParams(config)
+	rows, err := pool.Pool.Query(ctx, config.SQL, paramValues...)
 	if err != nil {
 		return err
 	}

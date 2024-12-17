@@ -3,9 +3,9 @@ package data
 import (
 	"context"
 	"log"
-	"maps"
 	"net/url"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 
@@ -13,13 +13,19 @@ import (
 )
 
 type StreamConfig struct {
-	StreamName  string                 `json:"stream_name,omitempty" yaml:"stream_name,omitempty"`
-	Filename    *string                `json:"filename,omitempty" yaml:"filename,omitempty"`
-	Format      string                 `json:"format,omitempty" yaml:"format,omitempty"`
-	SQL         string                 `json:"sql,omitempty" yaml:"sql,omitempty"`
-	Compression string                 `json:"compression,omitempty" yaml:"compression,omitempty"`
-	Columns     []Column               `json:"columns,omitempty" yaml:"columns,omitempty"`
-	Params      map[string]interface{} `json:"params,omitempty" yaml:"params,omitempty"`
+	StreamName  string           `json:"stream_name,omitempty" yaml:"stream_name,omitempty"`
+	Filename    *string          `json:"filename,omitempty" yaml:"filename,omitempty"`
+	Format      string           `json:"format,omitempty" yaml:"format,omitempty"`
+	SQL         string           `json:"sql,omitempty" yaml:"sql,omitempty"`
+	Compression string           `json:"compression,omitempty" yaml:"compression,omitempty"`
+	Columns     []Column         `json:"columns,omitempty" yaml:"columns,omitempty"`
+	Params      map[string]Param `json:"params,omitempty" yaml:"params,omitempty"`
+	ParamKeys   []string
+}
+
+type Param struct {
+	Value string `json:"value" yaml:"value"`
+	Type  string `json:"type" yaml:"type"`
 }
 
 type Column struct {
@@ -44,7 +50,6 @@ type DataStream struct {
 	BatchSize   int
 	Columns     []Column
 	DestColumns []Column
-	IsSqlServer bool
 }
 
 type DataWriter interface {
@@ -70,19 +75,43 @@ func NewStreamConfigFromYaml(data []byte) (*StreamConfig, error) {
 		streamConfig.SQL = "SELECT * FROM " + streamConfig.StreamName
 	}
 
-	env_params := GetMVRVars("PARAM")
+	env_params_raw := GetMVRVars("PARAM")
+	env_params := make(map[string]Param)
+
+	for key, value := range env_params_raw {
+		env_params[key] = Param{Value: value}
+	}
 	if streamConfig.Params == nil {
-		streamConfig.Params = make(map[string]interface{})
+		streamConfig.Params = make(map[string]Param)
 	}
 
-	maps.Insert(streamConfig.Params, maps.All(env_params))
+	for key, value := range env_params {
+		// look for the value in the environment
+		if p, found := streamConfig.Params[key]; found {
+			p.Value = value.Value
+			if p.Type == "" {
+				p.Type = "TEXT"
+			}
+			streamConfig.Params[key] = p
+		} else {
+			value.Type = "TEXT"
+			streamConfig.Params[key] = value
+		}
+	}
+
+	keys := make([]string, 0, len(streamConfig.Params))
+	for key := range streamConfig.Params {
+		keys = append(keys, key)
+	}
+	SortKeys(keys)
+	streamConfig.ParamKeys = keys
 
 	return &streamConfig, nil
 }
 
-func GetMVRVars(prefix string) map[string]any {
+func GetMVRVars(prefix string) map[string]string {
 	full_prefix := "MVR_" + prefix + "_"
-	params := make(map[string]any)
+	params := make(map[string]string)
 	for _, env := range os.Environ() {
 		if strings.HasPrefix(env, full_prefix) {
 			parts := strings.SplitN(env, "=", 2)
@@ -93,6 +122,12 @@ func GetMVRVars(prefix string) map[string]any {
 		}
 	}
 	return params
+}
+
+func SortKeys(params []string) {
+	slices.SortFunc(params, func(i, j string) int {
+		return strings.Compare(i, j)
+	})
 }
 
 func (ds *DataStream) BatchesToWriter(wg *sync.WaitGroup, writer DataWriter) {
