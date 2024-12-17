@@ -2,22 +2,22 @@ package database
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"net/url"
 
-	"github.com/jmoiron/sqlx"
 	"github.com/johanan/mvr/data"
 	_ "github.com/microsoft/go-mssqldb"
 )
 
 type MSDataReader struct {
-	Conn             *sqlx.DB
+	Conn             *sql.DB
 	KeepOriginalUUID bool
 }
 
 func NewMSDataReader(connUrl *url.URL) (*MSDataReader, error) {
 	connString := connUrl.String()
-	db, err := sqlx.Open("sqlserver", connString)
+	db, err := sql.Open("sqlserver", connString)
 	if err != nil {
 		return nil, err
 	}
@@ -32,7 +32,12 @@ func (reader *MSDataReader) Close() error {
 func (reader *MSDataReader) CreateDataStream(connUrl *url.URL, config *data.StreamConfig) (*DataStream, error) {
 	col_query := "SELECT * FROM (" + config.SQL + ") as sub ORDER BY (SELECT NULL) OFFSET 0 ROWS FETCH NEXT 1 ROWS ONLY"
 
-	rows, err := reader.Conn.NamedQuery(col_query, config.Params)
+	paramValues := BuildParams(config)
+	sqlParams := make([]interface{}, 0, len(config.ParamKeys))
+	for i, key := range config.ParamKeys {
+		sqlParams = append(sqlParams, sql.Named(key, paramValues[i]))
+	}
+	rows, err := reader.Conn.QueryContext(context.Background(), col_query, sqlParams...)
 	if err != nil {
 		return nil, err
 	}
@@ -52,11 +57,16 @@ func (reader *MSDataReader) CreateDataStream(connUrl *url.URL, config *data.Stre
 
 	batchChan := make(chan Batch, 10)
 
-	return &DataStream{TotalRows: 0, BatchChan: batchChan, BatchSize: 1000, Columns: columns, DestColumns: destColumns, IsSqlServer: true}, nil
+	return &DataStream{TotalRows: 0, BatchChan: batchChan, BatchSize: 1000, Columns: columns, DestColumns: destColumns}, nil
 }
 
 func (reader *MSDataReader) ExecuteDataStream(ctx context.Context, ds *DataStream, config *data.StreamConfig) error {
-	rows, err := reader.Conn.NamedQueryContext(ctx, config.SQL, config.Params)
+	paramValues := BuildParams(config)
+	sqlParams := make([]interface{}, 0, len(config.ParamKeys))
+	for i, key := range config.ParamKeys {
+		sqlParams = append(sqlParams, sql.Named(key, paramValues[i]))
+	}
+	rows, err := reader.Conn.QueryContext(ctx, config.SQL, sqlParams...)
 	if err != nil {
 		return err
 	}

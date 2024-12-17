@@ -2,19 +2,19 @@ package database
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"log"
 	"net/url"
 	"strings"
 
-	"github.com/jmoiron/sqlx"
 	"github.com/johanan/mvr/data"
 	"github.com/snowflakedb/gosnowflake"
 )
 
 type SnowflakeDataReader struct {
-	Snowflake *sqlx.DB
+	Snowflake *sql.DB
 }
 
 func NewSnowflakeDataReader(connUrl *url.URL) (*SnowflakeDataReader, error) {
@@ -26,7 +26,7 @@ func NewSnowflakeDataReader(connUrl *url.URL) (*SnowflakeDataReader, error) {
 
 	connString = strings.ReplaceAll(connString, "snowflake://", "")
 
-	db, err := sqlx.Open("snowflake", connString)
+	db, err := sql.Open("snowflake", connString)
 	if err != nil {
 		return nil, err
 	}
@@ -45,7 +45,13 @@ func (sf *SnowflakeDataReader) CreateDataStream(connUrl *url.URL, config *data.S
 	// let's get the columns
 	col_query := "SELECT * FROM (" + config.SQL + ") LIMIT 0 OFFSET 0"
 
-	rows, err := db.NamedQuery(col_query, config.Params)
+	stmt, err := db.Prepare(col_query)
+	if err != nil {
+		return nil, err
+	}
+	defer stmt.Close()
+	paramValues := BuildParams(config)
+	rows, err := stmt.Query(paramValues...)
 	if err != nil {
 		return nil, err
 	}
@@ -65,18 +71,19 @@ func (sf *SnowflakeDataReader) CreateDataStream(connUrl *url.URL, config *data.S
 
 	batchChan := make(chan Batch, 10)
 
-	return &DataStream{TotalRows: 0, BatchChan: batchChan, BatchSize: 1000, Columns: columns, DestColumns: destColumns, IsSqlServer: false}, nil
+	return &DataStream{TotalRows: 0, BatchChan: batchChan, BatchSize: 1000, Columns: columns, DestColumns: destColumns}, nil
 }
 
 func (sf *SnowflakeDataReader) ExecuteDataStream(ctx context.Context, ds *DataStream, config *data.StreamConfig) error {
 	db := sf.Snowflake
-	stmt, err := db.PrepareNamedContext(gosnowflake.WithHigherPrecision(ctx), config.SQL)
+	stmt, err := db.PrepareContext(gosnowflake.WithHigherPrecision(ctx), config.SQL)
 	if err != nil {
 		log.Fatalf("Failed to prepare query: %v", err)
 	}
 	defer stmt.Close()
 
-	result, err := stmt.QueryContext(gosnowflake.WithHigherPrecision(ctx), config.Params)
+	paramValues := BuildParams(config)
+	result, err := stmt.QueryContext(gosnowflake.WithHigherPrecision(ctx), paramValues...)
 	if err != nil {
 		log.Fatalf("Failed to execute query: %v", err)
 	}

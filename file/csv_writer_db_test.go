@@ -17,12 +17,13 @@ import (
 func TestCSVWriter_FromPG(t *testing.T) {
 	tests := []struct {
 		name     string
-		sql      string
+		yaml     string
 		expected string
 	}{
 		{
 			name: "Numbers Test",
-			sql:  "SELECT * FROM public.numbers",
+			yaml: `stream_name: public.numbers
+format: csv`,
 			expected: `smallint_value,integer_value,bigint_value,decimal_value,double_value,float_value
 1,1,1,1.000000000000000,1,1
 2,2,2,2.000000000000000,2,2
@@ -33,7 +34,8 @@ func TestCSVWriter_FromPG(t *testing.T) {
 		},
 		{
 			name: "Strings Test",
-			sql:  "SELECT * FROM public.strings",
+			yaml: `stream_name: public.strings
+format: csv`,
 			expected: `char_value,varchar_value,text_value,json_value,jsonb_value,array_value
 a         ,a,a,{},{},[]
 b         ,b,b,"{""key"":""value""}","{""key"":""value""}","[""a""]"
@@ -41,10 +43,23 @@ b         ,b,b,"{""key"":""value""}","{""key"":""value""}","[""a""]"
 		},
 		{
 			name: "Default users Table Test",
-			sql:  "SELECT * FROM public.users",
+			yaml: `stream_name: public.users
+format: csv`,
 			expected: `name,created,createdz,unique_id,nullable_id,active
 John Doe,2024-10-08T17:22:00,2024-10-08T17:22:00Z,a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11,NULL,true
 Test Tester,2024-10-08T17:22:00,2024-10-08T17:22:00Z,a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a12,NULL,false
+`,
+		}, {
+			name: "Numbers Limit Test",
+			yaml: `stream_name: public.numbers
+format: csv
+sql: SELECT * FROM public.numbers LIMIT $1
+params:
+  "$1":
+    value: 1
+    type: INT8`,
+			expected: `smallint_value,integer_value,bigint_value,decimal_value,double_value,float_value
+1,1,1,1.000000000000000,1,1
 `,
 		},
 	}
@@ -55,7 +70,8 @@ Test Tester,2024-10-08T17:22:00,2024-10-08T17:22:00Z,a0eebc99-9c0b-4ef8-bb6d-6bb
 			var buf bytes.Buffer
 
 			// actually query the database
-			sc := &data.StreamConfig{StreamName: tt.name, Format: "csv", SQL: tt.sql}
+			sc, err := data.NewStreamConfigFromYaml([]byte(tt.yaml))
+			assert.NoError(t, err)
 			local_url, _ := url.Parse(local_db_url)
 
 			pgr, _ := database.NewPGDataReader(local_url)
@@ -91,12 +107,13 @@ Test Tester,2024-10-08T17:22:00,2024-10-08T17:22:00Z,a0eebc99-9c0b-4ef8-bb6d-6bb
 func TestCsvWriter_FromMS(t *testing.T) {
 	tests := []struct {
 		name     string
-		sql      string
+		yaml     string
 		expected string
 	}{
 		{
 			name: "Numbers Test",
-			sql:  "SELECT * FROM dbo.numbers",
+			yaml: `stream_name: dbo.numbers
+format: csv`,
 			expected: `smallint_value,integer_value,bigint_value,decimal_value,double_value,float_value
 1,1,1,1.000000000000000,1,1
 2,2,2,2.000000000000000,2,2
@@ -107,7 +124,15 @@ func TestCsvWriter_FromMS(t *testing.T) {
 		},
 		{
 			name: "Strings Test",
-			sql:  "SELECT * FROM dbo.strings",
+			yaml: `stream_name: dbo.strings
+format: csv
+columns:
+  - name: json_value
+    database_type: JSON
+  - name: jsonb_value
+    database_type: JSON
+  - name: array_value
+    database_type: JSON`,
 			expected: `char_value,varchar_value,text_value,json_value,jsonb_value,array_value
 a         ,a,a,{},{},[]
 b         ,b,b,"{""key"":""value""}","{""key"":""value""}","[""a""]"
@@ -115,10 +140,24 @@ b         ,b,b,"{""key"":""value""}","{""key"":""value""}","[""a""]"
 		},
 		{
 			name: "Default users Table Test",
-			sql:  "SELECT * FROM dbo.users",
+			yaml: `stream_name: dbo.users
+format: csv`,
 			expected: `name,created,createdz,unique_id,nullable_id,active
 John Doe,2024-10-08T17:22:00,2024-10-08T17:22:00Z,a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11,NULL,true
 Test Tester,2024-10-08T17:22:00,2024-10-08T17:22:00Z,a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a12,NULL,false
+`,
+		},
+		{
+			name: "Numbers Limit Test",
+			yaml: `stream_name: dbo.numbers
+format: csv
+sql: SELECT * FROM dbo.numbers where smallint_value = @smallint
+params:
+  "smallint":
+    value: 1
+    type: INT8`,
+			expected: `smallint_value,integer_value,bigint_value,decimal_value,double_value,float_value
+1,1,1,1.000000000000000,1,1
 `,
 		},
 	}
@@ -128,16 +167,11 @@ Test Tester,2024-10-08T17:22:00,2024-10-08T17:22:00Z,a0eebc99-9c0b-4ef8-bb6d-6bb
 			// Create a buffer to write the CSV data to
 			var buf bytes.Buffer
 
-			override := []data.Column{
-				{Name: "json_value", DatabaseType: "JSON"},
-				{Name: "jsonb_value", DatabaseType: "JSON"},
-				{Name: "array_value", DatabaseType: "JSON"},
-			}
-
 			// right now only Azure has json types
 			// https://learn.microsoft.com/en-us/sql/t-sql/data-types/json-data-type?view=azuresqldb-current
 			// so we will override the types here
-			sc := &data.StreamConfig{StreamName: tt.name, Format: "csv", SQL: tt.sql, Columns: override}
+			sc, err := data.NewStreamConfigFromYaml([]byte(tt.yaml))
+			assert.NoError(t, err)
 			local_url, _ := url.Parse(local_ms_url)
 
 			msr, _ := database.NewMSDataReader(local_url)
