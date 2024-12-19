@@ -1,7 +1,7 @@
 # Install
 Run the install script 
 ```shell
-https://raw.githubusercontent.com/johanan/mvr/refs/heads/main/mvr_install.sh | sh
+curl -sf https://raw.githubusercontent.com/johanan/mvr/refs/heads/main/mvr_install.sh | sh
 ```
 
 # Abstract Database Types
