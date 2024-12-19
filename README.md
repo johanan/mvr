@@ -1,3 +1,9 @@
+# Install
+Run the install script 
+```shell
+https://raw.githubusercontent.com/johanan/mvr/refs/heads/main/mvr_install.sh | sh
+```
+
 # Abstract Database Types
 MVR abstracts to Postgres types. What this means is anytime a type is needed it should be expressed as a Postgres type. IE parameter types, overriding column types. 
 
