@@ -3,7 +3,6 @@ package core
 import (
 	"io"
 	"net/url"
-	"sync"
 
 	"github.com/johanan/mvr/data"
 )
@@ -24,8 +23,6 @@ type Config struct {
 type ExecutionConfig struct {
 	Config      *Config
 	WriterPipe  *io.PipeWriter
-	ReaderWg    *sync.WaitGroup
-	WriterWg    *sync.WaitGroup
 	Concurrency int
 }
 
@@ -47,8 +44,6 @@ func NewExecutionConfig(config *Config, concurrency int) *ExecutionConfig {
 	return &ExecutionConfig{
 		Config:      config,
 		WriterPipe:  nil,
-		ReaderWg:    &sync.WaitGroup{},
-		WriterWg:    &sync.WaitGroup{},
 		Concurrency: concurrency,
 	}
 }

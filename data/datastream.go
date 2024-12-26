@@ -59,7 +59,7 @@ type DataWriter interface {
 }
 
 type DBReaderConn interface {
-	CreateDataStream(cs *url.URL, config *StreamConfig) (*DataStream, error)
+	CreateDataStream(ctx context.Context, cs *url.URL, config *StreamConfig) (*DataStream, error)
 	ExecuteDataStream(ctx context.Context, ds *DataStream, config *StreamConfig) error
 	Close() error
 }
@@ -130,9 +130,7 @@ func SortKeys(params []string) {
 	})
 }
 
-func (ds *DataStream) BatchesToWriter(wg *sync.WaitGroup, writer DataWriter) {
-	defer wg.Done()
-
+func (ds *DataStream) BatchesToWriter(writer DataWriter) {
 	for batch := range ds.BatchChan {
 		ds.Mux.Lock()
 		for _, row := range batch.Rows {

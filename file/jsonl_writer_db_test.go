@@ -50,17 +50,16 @@ func TestJsonlWriter_FromPG(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create a buffer to write the CSV data to
 			var buf bytes.Buffer
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
 
 			// actually query the database
 			sc := &data.StreamConfig{StreamName: tt.name, Format: "jsonl", SQL: tt.sql}
 			local_url, _ := url.Parse(local_db_url)
 
 			pgr, _ := database.NewPGDataReader(local_url)
-			pgDs, _ := pgr.CreateDataStream(local_url, sc)
+			pgDs, _ := pgr.CreateDataStream(ctx, local_url, sc)
 			defer pgr.Close()
-
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
 
 			rg := sync.WaitGroup{}
 
@@ -76,7 +75,10 @@ func TestJsonlWriter_FromPG(t *testing.T) {
 			writer := &JSONLWriter{pgDs, &buf}
 
 			rg.Add(1)
-			go pgDs.BatchesToWriter(&rg, writer)
+			go func() {
+				defer rg.Done()
+				pgDs.BatchesToWriter(writer)
+			}()
 			rg.Wait()
 
 			assert.Equal(t, tt.expected, buf.String())
@@ -121,6 +123,8 @@ func TestJsonlWriter_FromMS(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create a buffer to write the CSV data to
 			var buf bytes.Buffer
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
 
 			override := []data.Column{
 				{Name: "json_value", DatabaseType: "JSON"},
@@ -135,12 +139,9 @@ func TestJsonlWriter_FromMS(t *testing.T) {
 			local_url, _ := url.Parse(local_ms_url)
 
 			msr, _ := database.NewMSDataReader(local_url)
-			msDs, err := msr.CreateDataStream(local_url, sc)
+			msDs, err := msr.CreateDataStream(ctx, local_url, sc)
 			assert.NoError(t, err)
 			defer msr.Close()
-
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
 
 			rg := sync.WaitGroup{}
 
@@ -156,7 +157,10 @@ func TestJsonlWriter_FromMS(t *testing.T) {
 			writer := &JSONLWriter{msDs, &buf}
 
 			rg.Add(1)
-			go msDs.BatchesToWriter(&rg, writer)
+			go func() {
+				defer rg.Done()
+				msDs.BatchesToWriter(writer)
+			}()
 			rg.Wait()
 
 			assert.Equal(t, tt.expected, buf.String())

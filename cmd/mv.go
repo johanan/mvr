@@ -18,7 +18,9 @@ var mvCfgFile string
 var mvCmd = &cobra.Command{
 	Use:   "mv",
 	Short: "mv is what mvs the data",
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := cmd.Context()
+
 		templateData, err := os.ReadFile(mvCfgFile)
 		if err != nil {
 			log.Fatalf("Error reading template file: %v", err)
@@ -36,20 +38,18 @@ var mvCmd = &cobra.Command{
 
 		sConfig, err := d.NewStreamConfigFromYaml(renderedConfig.Bytes())
 		if err != nil {
-			fmt.Println("Error parsing config file:", err)
-			os.Exit(1)
+			return fmt.Errorf("error parsing config: %v", err)
 		}
 
 		task, err := core.SetupMv(sConfig)
 		if err != nil {
-			fmt.Println(err)
-			os.Exit(1)
+			return fmt.Errorf("error setting up task: %v", err)
 		}
-		err = core.RunMv(task)
+		err = core.RunMv(ctx, task)
 		if err != nil {
-			fmt.Println(err)
-			os.Exit(1)
+			return fmt.Errorf("error running task: %v", err)
 		}
+		return nil
 	},
 }
 

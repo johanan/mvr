@@ -297,17 +297,16 @@ func Test_FullRoundTrip_ToPG(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create a buffer to write the CSV data to
 			var buf bytes.Buffer
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
 
 			// actually query the database
 			sc := &data.StreamConfig{StreamName: tt.name, Format: "parquet", SQL: tt.sql}
 			local_url, _ := url.Parse(local_db_url)
 
 			pgr, _ := database.NewPGDataReader(local_url)
-			pgDs, _ := pgr.CreateDataStream(local_url, sc)
+			pgDs, _ := pgr.CreateDataStream(ctx, local_url, sc)
 			defer pgr.Close()
-
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
 
 			rg := sync.WaitGroup{}
 
@@ -323,7 +322,10 @@ func Test_FullRoundTrip_ToPG(t *testing.T) {
 			writer := NewParquetDataWriter(pgDs, &buf)
 
 			rg.Add(1)
-			go pgDs.BatchesToWriter(&rg, writer)
+			go func() {
+				defer rg.Done()
+				pgDs.BatchesToWriter(writer)
+			}()
 			rg.Wait()
 			writer.Close()
 
@@ -363,7 +365,10 @@ func TestParquetWriter(t *testing.T) {
 
 	rg := sync.WaitGroup{}
 	rg.Add(1)
-	go ds.BatchesToWriter(&rg, pdw)
+	go func() {
+		defer rg.Done()
+		ds.BatchesToWriter(pdw)
+	}()
 	rg.Wait()
 
 	pdw.Close()

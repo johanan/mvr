@@ -29,7 +29,7 @@ func (reader *MSDataReader) Close() error {
 	return reader.Conn.Close()
 }
 
-func (reader *MSDataReader) CreateDataStream(connUrl *url.URL, config *data.StreamConfig) (*DataStream, error) {
+func (reader *MSDataReader) CreateDataStream(ctx context.Context, connUrl *url.URL, config *data.StreamConfig) (*DataStream, error) {
 	col_query := "SELECT * FROM (" + config.SQL + ") as sub ORDER BY (SELECT NULL) OFFSET 0 ROWS FETCH NEXT 1 ROWS ONLY"
 
 	paramValues := BuildParams(config)
@@ -37,7 +37,7 @@ func (reader *MSDataReader) CreateDataStream(connUrl *url.URL, config *data.Stre
 	for i, key := range config.ParamKeys {
 		sqlParams = append(sqlParams, sql.Named(key, paramValues[i]))
 	}
-	rows, err := reader.Conn.QueryContext(context.Background(), col_query, sqlParams...)
+	rows, err := reader.Conn.QueryContext(ctx, col_query, sqlParams...)
 	if err != nil {
 		return nil, err
 	}
