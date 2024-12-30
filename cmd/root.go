@@ -16,6 +16,7 @@ var rootCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(mvCmd)
+	rootCmd.PersistentFlags().BoolP("debug", "d", false, "enable debug logging")
 }
 
 func Execute(ctx context.Context) error {

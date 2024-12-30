@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jackc/pgx/v5/stdlib"
 	"github.com/johanan/mvr/data"
+	"github.com/rs/zerolog/log"
 )
 
 type PGDataReader struct {
@@ -80,12 +81,13 @@ func (pool *PGDataReader) CreateDataStream(ctx context.Context, connUrl *url.URL
 	}
 
 	batchChan := make(chan Batch, 10)
-
-	return &DataStream{TotalRows: 0, BatchChan: batchChan, BatchSize: 1000, Columns: columns, DestColumns: destColumns}, nil
+	logColumns(columns, destColumns)
+	return &DataStream{TotalRows: 0, BatchChan: batchChan, BatchSize: config.GetBatchSize(), Columns: columns, DestColumns: destColumns}, nil
 
 }
 
 func (pool *PGDataReader) ExecuteDataStream(ctx context.Context, ds *DataStream, config *data.StreamConfig) error {
+	log.Debug().Str("sql", config.SQL).Msg("Executing data stream")
 	paramValues := BuildParams(config)
 	rows, err := pool.Pool.Query(ctx, config.SQL, paramValues...)
 	if err != nil {
@@ -108,6 +110,7 @@ func (pool *PGDataReader) ExecuteDataStream(ctx context.Context, ds *DataStream,
 		batch.Rows = append(batch.Rows, row)
 
 		if len(batch.Rows) >= ds.BatchSize {
+			log.Trace().Msg("Sending batch")
 			select {
 			case ds.BatchChan <- batch:
 				batch = data.Batch{Rows: make([][]any, 0, ds.BatchSize)}
@@ -119,6 +122,7 @@ func (pool *PGDataReader) ExecuteDataStream(ctx context.Context, ds *DataStream,
 
 	// Send any remaining rows
 	if len(batch.Rows) > 0 {
+		log.Trace().Msg("Sending remaining batch")
 		select {
 		case ds.BatchChan <- batch:
 		case <-ctx.Done():
@@ -126,7 +130,9 @@ func (pool *PGDataReader) ExecuteDataStream(ctx context.Context, ds *DataStream,
 		}
 	}
 
+	log.Debug().Msg("Finished reading rows")
 	close(ds.BatchChan)
+	log.Debug().Msg("Closed batch channel")
 
 	return nil
 }

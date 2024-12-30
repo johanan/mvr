@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"html/template"
-	"log"
 	"net/url"
 	"os"
 	"slices"
@@ -15,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Masterminds/sprig/v3"
+	"github.com/rs/zerolog/log"
 	"gopkg.in/yaml.v2"
 )
 
@@ -27,6 +27,7 @@ type StreamConfig struct {
 	Columns     []Column         `json:"columns,omitempty" yaml:"columns,omitempty"`
 	Params      map[string]Param `json:"params,omitempty" yaml:"params,omitempty"`
 	ParamKeys   []string
+	BatchSize   int `json:"batch_size,omitempty" yaml:"batch_size,omitempty"`
 }
 
 type Param struct {
@@ -70,6 +71,13 @@ type DBReaderConn interface {
 	Close() error
 }
 
+func (sc *StreamConfig) GetBatchSize() int {
+	if sc.BatchSize == 0 {
+		return 100000
+	}
+	return sc.BatchSize
+}
+
 func (sc *StreamConfig) Validate() error {
 	if sc.StreamName == "" && sc.SQL == "" {
 		return errors.New("stream_name or sql must be provided")
@@ -101,6 +109,10 @@ func (sc *StreamConfig) OverrideValues(cliArgs *StreamConfig) {
 
 	if cliArgs.Compression != "" {
 		sc.Compression = cliArgs.Compression
+	}
+
+	if cliArgs.BatchSize != 0 {
+		sc.BatchSize = cliArgs.BatchSize
 	}
 }
 
@@ -257,18 +269,19 @@ func (ds *DataStream) BatchesToWriter(writer DataWriter) {
 			err := writer.WriteRow(row)
 			ds.TotalRows++
 			if err != nil {
-				log.Fatalf("Failed to write row: %v", err)
+				log.Fatal().Msgf("Failed to write row: %v", err)
 			}
 		}
 
 		err := writer.Flush()
 		if err != nil {
-			log.Fatalf("Failed to flush writer: %v", err)
+			log.Fatal().Msgf("Failed to flush writer: %v", err)
 		}
 
 		ds.Mux.Unlock()
+		log.Trace().Int("total_rows", ds.TotalRows).Msg("Batch written")
 	}
-
+	log.Trace().Msg("All batches written")
 }
 
 func OverrideColumns(original []Column, overrides []Column) []Column {
