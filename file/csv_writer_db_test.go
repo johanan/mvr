@@ -72,7 +72,7 @@ params:
 			defer cancel()
 
 			// actually query the database
-			sc, err := data.NewStreamConfigFromYaml([]byte(tt.yaml))
+			sc, err := data.BuildConfig([]byte(tt.yaml), &data.StreamConfig{})
 			assert.NoError(t, err)
 			local_url, _ := url.Parse(local_db_url)
 
@@ -174,7 +174,7 @@ params:
 			// right now only Azure has json types
 			// https://learn.microsoft.com/en-us/sql/t-sql/data-types/json-data-type?view=azuresqldb-current
 			// so we will override the types here
-			sc, err := data.NewStreamConfigFromYaml([]byte(tt.yaml))
+			sc, err := data.BuildConfig([]byte(tt.yaml), &data.StreamConfig{})
 			assert.NoError(t, err)
 			local_url, _ := url.Parse(local_ms_url)
 

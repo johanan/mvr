@@ -1,19 +1,20 @@
 package cmd
 
 import (
-	"bytes"
 	"fmt"
-	"log"
 	"os"
-	"text/template"
 
-	"github.com/Masterminds/sprig/v3"
 	"github.com/johanan/mvr/core"
 	d "github.com/johanan/mvr/data"
 	"github.com/spf13/cobra"
 )
 
 var mvCfgFile string
+var mvFormat string
+var mvFilename string
+var mvSql string
+var mvCompression string
+var mvName string
 
 var mvCmd = &cobra.Command{
 	Use:   "mv",
@@ -21,24 +22,28 @@ var mvCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
 
-		templateData, err := os.ReadFile(mvCfgFile)
-		if err != nil {
-			log.Fatalf("Error reading template file: %v", err)
+		var templateData []byte
+		var err error
+
+		if mvCfgFile != "" {
+			templateData, err = os.ReadFile(mvCfgFile)
+			if err != nil {
+				return fmt.Errorf("error reading template file: %v", err)
+			}
+		} else {
+			templateData = []byte("")
+		}
+		cliArgs := &d.StreamConfig{
+			Format:      mvFormat,
+			Filename:    mvFilename,
+			SQL:         mvSql,
+			Compression: mvCompression,
+			StreamName:  mvName,
 		}
 
-		tmpl, err := template.New("base").Funcs(sprig.TxtFuncMap()).Parse(string(templateData))
+		sConfig, err := d.BuildConfig(templateData, cliArgs)
 		if err != nil {
-			log.Fatalf("Error parsing template: %v", err)
-		}
-
-		tmplVars := d.GetMVRVars("TMPL")
-
-		var renderedConfig bytes.Buffer
-		tmpl.Execute(&renderedConfig, tmplVars)
-
-		sConfig, err := d.NewStreamConfigFromYaml(renderedConfig.Bytes())
-		if err != nil {
-			return fmt.Errorf("error parsing config: %v", err)
+			return fmt.Errorf("error parsing template: %v", err)
 		}
 
 		task, err := core.SetupMv(sConfig)
@@ -54,6 +59,10 @@ var mvCmd = &cobra.Command{
 }
 
 func init() {
-	mvCmd.PersistentFlags().StringVarP(&mvCfgFile, "config", "f", "", "config file")
-	mvCmd.MarkPersistentFlagRequired("config")
+	mvCmd.Flags().StringVarP(&mvCfgFile, "config", "f", "", "config file")
+	mvCmd.Flags().StringVar(&mvFormat, "format", "", "output file format")
+	mvCmd.Flags().StringVar(&mvFilename, "filename", "", "output file name")
+	mvCmd.Flags().StringVar(&mvSql, "sql", "", "sql query to run")
+	mvCmd.Flags().StringVar(&mvCompression, "compression", "", "compression type")
+	mvCmd.Flags().StringVar(&mvName, "name", "", "stream name")
 }
