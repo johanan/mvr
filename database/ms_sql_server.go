@@ -8,6 +8,7 @@ import (
 
 	"github.com/johanan/mvr/data"
 	_ "github.com/microsoft/go-mssqldb"
+	"github.com/rs/zerolog/log"
 )
 
 type MSDataReader struct {
@@ -56,11 +57,12 @@ func (reader *MSDataReader) CreateDataStream(ctx context.Context, connUrl *url.U
 	}
 
 	batchChan := make(chan Batch, 10)
-
-	return &DataStream{TotalRows: 0, BatchChan: batchChan, BatchSize: 1000, Columns: columns, DestColumns: destColumns}, nil
+	logColumns(columns, destColumns)
+	return &DataStream{TotalRows: 0, BatchChan: batchChan, BatchSize: config.GetBatchSize(), Columns: columns, DestColumns: destColumns}, nil
 }
 
 func (reader *MSDataReader) ExecuteDataStream(ctx context.Context, ds *DataStream, config *data.StreamConfig) error {
+	log.Debug().Str("sql", config.SQL).Msg("Executing data stream")
 	paramValues := BuildParams(config)
 	sqlParams := make([]interface{}, 0, len(config.ParamKeys))
 	for i, key := range config.ParamKeys {
@@ -101,6 +103,7 @@ func (reader *MSDataReader) ExecuteDataStream(ctx context.Context, ds *DataStrea
 		batch.Rows = append(batch.Rows, row)
 
 		if len(batch.Rows) >= ds.BatchSize {
+			log.Trace().Msg("Sending batch")
 			select {
 			case ds.BatchChan <- batch:
 				batch = data.Batch{Rows: make([][]any, 0, ds.BatchSize)}
@@ -112,6 +115,7 @@ func (reader *MSDataReader) ExecuteDataStream(ctx context.Context, ds *DataStrea
 
 	// Send any remaining rows
 	if len(batch.Rows) > 0 {
+		log.Trace().Msg("Sending remaining batch")
 		select {
 		case ds.BatchChan <- batch:
 		case <-ctx.Done():
@@ -119,7 +123,9 @@ func (reader *MSDataReader) ExecuteDataStream(ctx context.Context, ds *DataStrea
 		}
 	}
 
+	log.Debug().Msg("Finished reading rows")
 	close(ds.BatchChan)
+	log.Debug().Msg("Closed batch channel")
 
 	return nil
 }

@@ -90,6 +90,7 @@ columns:
 				StreamName: "OverriddenStream",
 				Format:     "jsonl",
 				SQL:        "SELECT id, name FROM users",
+				BatchSize:  1000,
 			},
 			expectedConfig: &StreamConfig{
 				StreamName:  "OverriddenStream",
@@ -100,6 +101,7 @@ columns:
 					{Name: "id", DatabaseType: "INT"},
 					{Name: "name", DatabaseType: "VARCHAR"},
 				},
+				BatchSize: 1000,
 				// Initialize other fields as needed
 			},
 			expectError: false,
@@ -125,9 +127,11 @@ sql: "{{ .SQL }`), // Missing closing braces
 stream_name: "TemplateStream"
 format: "csv"
 sql: "SELECT a, b FROM table"
-compression: "none"`),
+compression: "none"
+batch_size: 1000`),
 			cliArgs: &StreamConfig{
-				Format: "jsonl", // Override only the Format field
+				Format:    "jsonl",
+				BatchSize: 0, // Override only the Format field
 			},
 			expectedConfig: &StreamConfig{
 				StreamName:  "TemplateStream", // From template
@@ -135,6 +139,7 @@ compression: "none"`),
 				SQL:         "SELECT a, b FROM table",
 				Compression: "none",
 				Columns:     nil,
+				BatchSize:   1000, // only overriden if not 0
 			},
 			expectError: false,
 		},
@@ -156,6 +161,7 @@ compression: "none"`),
 				assert.Equal(t, tt.expectedConfig.SQL, config.SQL)
 				assert.Equal(t, tt.expectedConfig.Compression, config.Compression)
 				assert.Equal(t, tt.expectedConfig.Columns, config.Columns)
+				assert.Equal(t, tt.expectedConfig.BatchSize, config.BatchSize)
 
 				// Add more field assertions as necessary
 			}

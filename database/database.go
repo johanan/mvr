@@ -2,14 +2,30 @@ package database
 
 import (
 	"database/sql"
+	"encoding/json"
 
 	"github.com/johanan/mvr/data"
+	"github.com/rs/zerolog/log"
 	"github.com/spf13/cast"
 )
 
 type Column = data.Column
 type Batch = data.Batch
 type DataStream = data.DataStream
+
+func logColumns(cols, destCols []Column) {
+	jsonColumns, err := json.Marshal(cols)
+	if err != nil {
+		log.Debug().Err(err).Msg("Failed to marshal columns")
+	}
+
+	jsonDest, err := json.Marshal(destCols)
+	if err != nil {
+		log.Debug().Err(err).Msg("Failed to marshal destColumns")
+	}
+
+	log.Debug().Str("columns", string(jsonColumns)).Str("destColumns", string(jsonDest)).Msg("Created data stream")
+}
 
 func MapToMvrColumns(columns []*sql.ColumnType) []Column {
 	var cols []Column

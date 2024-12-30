@@ -5,11 +5,11 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"log"
 	"net/url"
 	"strings"
 
 	"github.com/johanan/mvr/data"
+	"github.com/rs/zerolog/log"
 	"github.com/snowflakedb/gosnowflake"
 )
 
@@ -70,22 +70,23 @@ func (sf *SnowflakeDataReader) CreateDataStream(ctx context.Context, connUrl *ur
 	}
 
 	batchChan := make(chan Batch, 10)
-
-	return &DataStream{TotalRows: 0, BatchChan: batchChan, BatchSize: 1000, Columns: columns, DestColumns: destColumns}, nil
+	logColumns(columns, destColumns)
+	return &DataStream{TotalRows: 0, BatchChan: batchChan, BatchSize: config.GetBatchSize(), Columns: columns, DestColumns: destColumns}, nil
 }
 
 func (sf *SnowflakeDataReader) ExecuteDataStream(ctx context.Context, ds *DataStream, config *data.StreamConfig) error {
+	log.Debug().Str("sql", config.SQL).Msg("Executing query")
 	db := sf.Snowflake
 	stmt, err := db.PrepareContext(gosnowflake.WithHigherPrecision(ctx), config.SQL)
 	if err != nil {
-		log.Fatalf("Failed to prepare query: %v", err)
+		log.Fatal().Msgf("Failed to prepare query: %v", err)
 	}
 	defer stmt.Close()
 
 	paramValues := BuildParams(config)
 	result, err := stmt.QueryContext(gosnowflake.WithHigherPrecision(ctx), paramValues...)
 	if err != nil {
-		log.Fatalf("Failed to execute query: %v", err)
+		log.Fatal().Msgf("Failed to execute query: %v", err)
 	}
 	defer result.Close()
 
@@ -104,6 +105,7 @@ func (sf *SnowflakeDataReader) ExecuteDataStream(ctx context.Context, ds *DataSt
 		batch.Rows = append(batch.Rows, row)
 
 		if len(batch.Rows) >= ds.BatchSize {
+			log.Trace().Msg("Sending batch")
 			select {
 			case ds.BatchChan <- batch:
 				batch = data.Batch{Rows: make([][]any, 0, ds.BatchSize)}
@@ -115,6 +117,7 @@ func (sf *SnowflakeDataReader) ExecuteDataStream(ctx context.Context, ds *DataSt
 
 	// Send any remaining rows
 	if len(batch.Rows) > 0 {
+		log.Trace().Msg("Sending remaining batch")
 		select {
 		case ds.BatchChan <- batch:
 		case <-ctx.Done():
@@ -122,7 +125,9 @@ func (sf *SnowflakeDataReader) ExecuteDataStream(ctx context.Context, ds *DataSt
 		}
 	}
 
+	log.Debug().Msg("Finished reading rows")
 	close(ds.BatchChan)
+	log.Debug().Msg("Closed batch channel")
 
 	return nil
 }
