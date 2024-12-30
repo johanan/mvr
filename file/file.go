@@ -17,15 +17,15 @@ func GetIo(parsed *url.URL, config *data.StreamConfig) (io *bufio.Writer, err er
 	case "stdout":
 		io = bufio.NewWriter(os.Stdout)
 	case "file":
-		if config.Filename == nil {
+		if config.Filename == "" {
 			return nil, fmt.Errorf("filename in StreamConfig cannot be nil")
 		}
 
-		if strings.TrimSpace(*config.Filename) == "" {
+		if strings.TrimSpace(config.Filename) == "" {
 			return nil, fmt.Errorf("filename in StreamConfig cannot be empty")
 		}
 
-		filePath := filepath.Join(parsed.Path, *config.Filename)
+		filePath := filepath.Join(parsed.Path, config.Filename)
 
 		dir := filepath.Dir(filePath)
 		if err := os.MkdirAll(dir, 0755); err != nil {

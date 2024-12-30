@@ -1,8 +1,7 @@
 package cmd
 
 import (
-	"fmt"
-	"os"
+	"context"
 
 	"github.com/spf13/cobra"
 )
@@ -19,9 +18,7 @@ func init() {
 	rootCmd.AddCommand(mvCmd)
 }
 
-func Execute() {
-	if err := rootCmd.Execute(); err != nil {
-		fmt.Println(err)
-		os.Exit(1)
-	}
+func Execute(ctx context.Context) error {
+	rootCmd.SetContext(ctx)
+	return rootCmd.Execute()
 }

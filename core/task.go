@@ -18,30 +18,13 @@ import (
 	"github.com/johanan/mvr/utils"
 )
 
-type Context struct {
-	Ctx    context.Context
-	Cancel context.CancelFunc
-	Mux    *sync.Mutex
-}
-
 type Task struct {
 	ExecConfig *ExecutionConfig
-	Ctx        *Context
-}
-
-func NewContext(parent context.Context) *Context {
-	ctx, cancel := context.WithCancel(parent)
-	return &Context{
-		Ctx:    ctx,
-		Cancel: cancel,
-		Mux:    &sync.Mutex{},
-	}
 }
 
 func NewTask(exec ExecutionConfig) *Task {
 	return &Task{
 		ExecConfig: &exec,
-		Ctx:        NewContext(context.Background()),
 	}
 }
 
@@ -101,7 +84,7 @@ func BuildDBReader(connURL *url.URL) (data.DBReaderConn, error) {
 	return reader, nil
 }
 
-func RunMv(task *Task) error {
+func RunMv(ctx context.Context, task *Task) error {
 	source := task.ExecConfig.Config.SourceConn.ParsedUrl
 	reader, err := BuildDBReader(source)
 	if err != nil {
@@ -109,7 +92,7 @@ func RunMv(task *Task) error {
 	}
 	defer reader.Close()
 
-	datastream, err := reader.CreateDataStream(task.ExecConfig.Config.SourceConn.ParsedUrl, task.ExecConfig.Config.StreamConfig)
+	datastream, err := reader.CreateDataStream(ctx, task.ExecConfig.Config.SourceConn.ParsedUrl, task.ExecConfig.Config.StreamConfig)
 	if err != nil {
 		return err
 	}
@@ -143,7 +126,7 @@ func RunMv(task *Task) error {
 		log.Fatalf("Unsupported format: %s", task.ExecConfig.Config.StreamConfig.Format)
 	}
 
-	execute(task, datastream, reader, writer)
+	execute(ctx, task, datastream, reader, writer)
 	defer writer.Close()
 	return nil
 }
@@ -205,33 +188,34 @@ func (w nopWriteCloser) Close() error {
 	return nil
 }
 
-func execute(task *Task, datastream *data.DataStream, reader data.DBReaderConn, writer data.DataWriter) {
+func execute(ctx context.Context, task *Task, datastream *data.DataStream, reader data.DBReaderConn, writer data.DataWriter) error {
 	defer reader.Close()
 
-	var readWg = task.ExecConfig.ReaderWg
-	var writeWg = task.ExecConfig.WriterWg
+	var wg sync.WaitGroup
 
 	for i := 0; i < task.ExecConfig.Concurrency; i++ {
-		writeWg.Add(1)
-		go datastream.BatchesToWriter(writeWg, writer)
+		wg.Add(1)
+		go func(workedId int) {
+			defer wg.Done()
+			datastream.BatchesToWriter(writer)
+		}(i)
 	}
 
 	config := task.ExecConfig.Config.StreamConfig
 
-	readWg.Add(1)
+	wg.Add(1)
 	go func() {
-		defer readWg.Done()
-		if err := reader.ExecuteDataStream(task.Ctx.Ctx, datastream, config); err != nil {
+		defer wg.Done()
+		if err := reader.ExecuteDataStream(ctx, datastream, config); err != nil {
 			log.Printf("ExecuteDataStream error: %v", err)
-			task.Ctx.Cancel()
 		}
 	}()
 
-	readWg.Wait()
-	writeWg.Wait()
+	wg.Wait()
 
 	if err := writer.Flush(); err != nil {
 		log.Fatalf("Failed to flush writer: %v", err)
 	}
 
+	return nil
 }

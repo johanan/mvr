@@ -39,19 +39,19 @@ func (sf *SnowflakeDataReader) Close() error {
 	return nil
 }
 
-func (sf *SnowflakeDataReader) CreateDataStream(connUrl *url.URL, config *data.StreamConfig) (ds *DataStream, err error) {
+func (sf *SnowflakeDataReader) CreateDataStream(ctx context.Context, connUrl *url.URL, config *data.StreamConfig) (ds *DataStream, err error) {
 	db := sf.Snowflake
 
 	// let's get the columns
 	col_query := "SELECT * FROM (" + config.SQL + ") LIMIT 0 OFFSET 0"
 
-	stmt, err := db.Prepare(col_query)
+	stmt, err := db.PrepareContext(ctx, col_query)
 	if err != nil {
 		return nil, err
 	}
 	defer stmt.Close()
 	paramValues := BuildParams(config)
-	rows, err := stmt.Query(paramValues...)
+	rows, err := stmt.QueryContext(ctx, paramValues...)
 	if err != nil {
 		return nil, err
 	}

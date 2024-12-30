@@ -51,7 +51,7 @@ func (pool *PGDataReader) Close() error {
 	return nil
 }
 
-func (pool *PGDataReader) CreateDataStream(connUrl *url.URL, config *data.StreamConfig) (ds *DataStream, err error) {
+func (pool *PGDataReader) CreateDataStream(ctx context.Context, connUrl *url.URL, config *data.StreamConfig) (ds *DataStream, err error) {
 	// switch to sql to get the columns
 	// this will use the code from pqx stdlib to map columns to a common interface
 	// we can also use pqx for querying the actual data
@@ -61,7 +61,7 @@ func (pool *PGDataReader) CreateDataStream(connUrl *url.URL, config *data.Stream
 	col_query := "SELECT * FROM (" + config.SQL + ") LIMIT 0 OFFSET 0"
 
 	paramValues := BuildParams(config)
-	rows, err := db.QueryContext(context.Background(), col_query, paramValues...)
+	rows, err := db.QueryContext(ctx, col_query, paramValues...)
 	if err != nil {
 		return nil, err
 	}

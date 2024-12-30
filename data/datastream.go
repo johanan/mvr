@@ -1,20 +1,26 @@
 package data
 
 import (
+	"bytes"
 	"context"
+	"errors"
+	"fmt"
+	"html/template"
 	"log"
 	"net/url"
 	"os"
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
+	"github.com/Masterminds/sprig/v3"
 	"gopkg.in/yaml.v2"
 )
 
 type StreamConfig struct {
 	StreamName  string           `json:"stream_name,omitempty" yaml:"stream_name,omitempty"`
-	Filename    *string          `json:"filename,omitempty" yaml:"filename,omitempty"`
+	Filename    string           `json:"filename,omitempty" yaml:"filename,omitempty"`
 	Format      string           `json:"format,omitempty" yaml:"format,omitempty"`
 	SQL         string           `json:"sql,omitempty" yaml:"sql,omitempty"`
 	Compression string           `json:"compression,omitempty" yaml:"compression,omitempty"`
@@ -59,9 +65,91 @@ type DataWriter interface {
 }
 
 type DBReaderConn interface {
-	CreateDataStream(cs *url.URL, config *StreamConfig) (*DataStream, error)
+	CreateDataStream(ctx context.Context, cs *url.URL, config *StreamConfig) (*DataStream, error)
 	ExecuteDataStream(ctx context.Context, ds *DataStream, config *StreamConfig) error
 	Close() error
+}
+
+func (sc *StreamConfig) Validate() error {
+	if sc.StreamName == "" && sc.SQL == "" {
+		return errors.New("stream_name or sql must be provided")
+	}
+
+	if sc.SQL == "" {
+		sc.SQL = "SELECT * FROM " + sc.StreamName
+	}
+
+	return nil
+}
+
+func (sc *StreamConfig) OverrideValues(cliArgs *StreamConfig) {
+	if cliArgs.StreamName != "" {
+		sc.StreamName = cliArgs.StreamName
+	}
+
+	if cliArgs.Format != "" {
+		sc.Format = cliArgs.Format
+	}
+
+	if cliArgs.Filename != "" {
+		sc.Filename = cliArgs.Filename
+	}
+
+	if cliArgs.SQL != "" {
+		sc.SQL = cliArgs.SQL
+	}
+
+	if cliArgs.Compression != "" {
+		sc.Compression = cliArgs.Compression
+	}
+}
+
+func ParseAndExecuteTemplate(data []byte, config *StreamConfig) ([]byte, error) {
+	tmpl, err := template.New("base").Funcs(sprig.TxtFuncMap()).Funcs(filenameFuncs(config)).Parse(string(data))
+	if err != nil {
+		return nil, fmt.Errorf("error parsing template: %v", err)
+	}
+
+	tmplVars := GetMVRVars("TMPL")
+
+	var renderedConfig bytes.Buffer
+	tmpl.Execute(&renderedConfig, tmplVars)
+
+	return renderedConfig.Bytes(), nil
+}
+
+func ext(config *StreamConfig) string {
+	var ext string
+	switch strings.ToLower(config.Format) {
+	case "csv":
+		ext = ".csv"
+	case "jsonl":
+		ext = ".jsonl"
+	case "parquet":
+		ext = ".parquet"
+	default:
+		ext = ""
+	}
+	switch strings.ToLower(config.Compression) {
+	case "gzip":
+		ext += ".gz"
+	case "snappy":
+		ext = ".snappy" + ext
+	}
+
+	return ext
+}
+
+func filenameFuncs(config *StreamConfig) template.FuncMap {
+	return template.FuncMap{
+		"YYYY":        func() string { return time.Now().Format("2006") },
+		"MM":          func() string { return time.Now().Format("01") },
+		"DD":          func() string { return time.Now().Format("02") },
+		"stream_name": func() string { return config.StreamName },
+		"format":      func() string { return config.Format },
+		"compression": func() string { return config.Compression },
+		"ext":         func() string { return ext(config) },
+	}
 }
 
 func NewStreamConfigFromYaml(data []byte) (*StreamConfig, error) {
@@ -69,10 +157,6 @@ func NewStreamConfigFromYaml(data []byte) (*StreamConfig, error) {
 	err := yaml.Unmarshal(data, &streamConfig)
 	if err != nil {
 		return nil, err
-	}
-
-	if streamConfig.SQL == "" {
-		streamConfig.SQL = "SELECT * FROM " + streamConfig.StreamName
 	}
 
 	env_params_raw := GetMVRVars("PARAM")
@@ -109,6 +193,42 @@ func NewStreamConfigFromYaml(data []byte) (*StreamConfig, error) {
 	return &streamConfig, nil
 }
 
+func BuildConfig(data []byte, cliArgs *StreamConfig) (*StreamConfig, error) {
+	first, err := ParseAndExecuteTemplate(data, &StreamConfig{})
+	if err != nil {
+		return nil, fmt.Errorf("error parsing template: %v", err)
+	}
+
+	sConfig, err := NewStreamConfigFromYaml(first)
+	if err != nil {
+		return nil, fmt.Errorf("error parsing config: %v", err)
+	}
+	sConfig.OverrideValues(cliArgs)
+	// create a yaml representation of the config
+	data, err = yaml.Marshal(sConfig)
+	if err != nil {
+		return nil, fmt.Errorf("error marshalling config: %v", err)
+	}
+
+	// execute a second time with values from the first parse
+	config, err := ParseAndExecuteTemplate(data, sConfig)
+	if err != nil {
+		return nil, fmt.Errorf("error parsing template: %v", err)
+	}
+
+	sConfig, err = NewStreamConfigFromYaml(config)
+	if err != nil {
+		return nil, fmt.Errorf("error parsing config: %v", err)
+	}
+
+	err = sConfig.Validate()
+	if err != nil {
+		return nil, fmt.Errorf("error validating config: %v", err)
+	}
+
+	return sConfig, nil
+}
+
 func GetMVRVars(prefix string) map[string]string {
 	full_prefix := "MVR_" + prefix + "_"
 	params := make(map[string]string)
@@ -130,9 +250,7 @@ func SortKeys(params []string) {
 	})
 }
 
-func (ds *DataStream) BatchesToWriter(wg *sync.WaitGroup, writer DataWriter) {
-	defer wg.Done()
-
+func (ds *DataStream) BatchesToWriter(writer DataWriter) {
 	for batch := range ds.BatchChan {
 		ds.Mux.Lock()
 		for _, row := range batch.Rows {
