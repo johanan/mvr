@@ -5,8 +5,10 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/johanan/mvr/cmd"
+	"github.com/rs/zerolog/log"
 )
 
 func main() {
@@ -23,6 +25,12 @@ func main() {
 		case <-ctx.Done():
 			return
 		}
+	}()
+
+	start := time.Now()
+	defer func() {
+		elapsed := time.Since(start)
+		log.Info().Msgf("Execution took %s", elapsed)
 	}()
 
 	if err := cmd.Execute(ctx); err != nil {

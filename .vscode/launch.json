@@ -14,7 +14,7 @@
             "env": {
                 "MVR_SOURCE": "postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable",
                 "MVR_DEST": "stdout://",
-                "MVR_TRACE": "true",
+                "MVR_TRACE": "false",
             },
         }
     ]
