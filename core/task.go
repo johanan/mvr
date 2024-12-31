@@ -6,7 +6,6 @@ import (
 	"context"
 	"errors"
 	"io"
-	"log"
 	"net/url"
 	"os"
 	"runtime"
@@ -16,6 +15,7 @@ import (
 	"github.com/johanan/mvr/database"
 	"github.com/johanan/mvr/file"
 	"github.com/johanan/mvr/utils"
+	"github.com/rs/zerolog/log"
 )
 
 type Task struct {
@@ -76,7 +76,7 @@ func BuildDBReader(connURL *url.URL) (data.DBReaderConn, error) {
 	case "snowflake":
 		reader, err = database.NewSnowflakeDataReader(connURL)
 	default:
-		log.Fatalf("Unsupported source: %s", source)
+		log.Fatal().Msgf("Unsupported source: %s", source)
 	}
 	if err != nil {
 		return nil, err
@@ -97,11 +97,16 @@ func RunMv(ctx context.Context, task *Task) error {
 		return err
 	}
 
-	// get the writer
-	bufWriter, err := file.GetIo(task.ExecConfig.Config.DestConn.ParsedUrl, task.ExecConfig.Config.StreamConfig)
+	path, err := file.BuildFullPath(task.ExecConfig.Config.DestConn.ParsedUrl, task.ExecConfig.Config.StreamConfig)
 	if err != nil {
 		return err
 	}
+	// get the writer
+	bufWriter, err := file.GetIo(path)
+	if err != nil {
+		return err
+	}
+	log.Info().Msgf("Writing to %s", path)
 
 	// just a string for now
 	compressedWriter, err := CreateCompressedWriter(bufWriter, task.ExecConfig.Config.StreamConfig.Compression, task.ExecConfig.Config.StreamConfig.Format)
@@ -123,11 +128,12 @@ func RunMv(ctx context.Context, task *Task) error {
 	case "parquet":
 		writer = file.AddParquet(datastream, compressedWriter)
 	default:
-		log.Fatalf("Unsupported format: %s", task.ExecConfig.Config.StreamConfig.Format)
+		log.Fatal().Msgf("Unsupported format: %s", task.ExecConfig.Config.StreamConfig.Format)
 	}
 
 	execute(ctx, task, datastream, reader, writer)
 	defer writer.Close()
+	log.Info().Int("rows", datastream.TotalRows).Msg("Finished writing data")
 	return nil
 }
 
@@ -214,7 +220,7 @@ func execute(ctx context.Context, task *Task, datastream *data.DataStream, reade
 	wg.Wait()
 
 	if err := writer.Flush(); err != nil {
-		log.Fatalf("Failed to flush writer: %v", err)
+		log.Fatal().Msgf("Failed to flush writer: %v", err)
 	}
 
 	return nil

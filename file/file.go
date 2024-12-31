@@ -12,20 +12,34 @@ import (
 	"github.com/johanan/mvr/data"
 )
 
-func GetIo(parsed *url.URL, config *data.StreamConfig) (io *bufio.Writer, err error) {
+func BuildFullPath(parsed *url.URL, config *data.StreamConfig) (string, error) {
 	switch parsed.Scheme {
 	case "stdout":
-		io = bufio.NewWriter(os.Stdout)
+		return "stdout", nil
 	case "file":
 		if config.Filename == "" {
-			return nil, fmt.Errorf("filename in StreamConfig cannot be nil")
+			return "", fmt.Errorf("filename in StreamConfig cannot be nil")
 		}
 
 		if strings.TrimSpace(config.Filename) == "" {
-			return nil, fmt.Errorf("filename in StreamConfig cannot be empty")
+			return "", fmt.Errorf("filename in StreamConfig cannot be empty")
 		}
 
 		filePath := filepath.Join(parsed.Path, config.Filename)
+		return filePath, nil
+	default:
+		return "", fmt.Errorf("invalid scheme: %s", parsed.Scheme)
+	}
+}
+
+func GetIo(filePath string) (io *bufio.Writer, err error) {
+	switch filePath {
+	case "stdout":
+		io = bufio.NewWriter(os.Stdout)
+	default:
+		if filePath == "" {
+			return nil, fmt.Errorf("filename in StreamConfig cannot be nil")
+		}
 
 		dir := filepath.Dir(filePath)
 		if err := os.MkdirAll(dir, 0755); err != nil {
@@ -44,9 +58,6 @@ func GetIo(parsed *url.URL, config *data.StreamConfig) (io *bufio.Writer, err er
 		}
 
 		io = bufio.NewWriter(file)
-	default:
-		io = nil
-		err = fmt.Errorf("invalid scheme: %s", parsed.Scheme)
 	}
 	return io, err
 }

@@ -1,6 +1,6 @@
 stream_name: public.users
 format: csv
-filename: {{ now | date "2006/01/02" }}/users-{{ now | unixEpoch }}.csv.gz
+filename: {{ now | date "2006/01/02" }}/users-{{ now | unixEpoch }}{{ext}}
 # compression: gzip
 sql: |
   SELECT * FROM public.users LIMIT 1000
