@@ -4,11 +4,14 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/johanan/mvr/core"
 	d "github.com/johanan/mvr/data"
+	"github.com/johanan/mvr/file"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
+	"github.com/schollz/progressbar/v3"
 	"github.com/spf13/cobra"
 )
 
@@ -66,10 +69,63 @@ var mvCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("error setting up task: %v", err)
 		}
-		err = core.RunMv(ctx, task)
+
+		silent, _ := cmd.Flags().GetBool("silent")
+		quiet, _ := cmd.Flags().GetBool("quiet")
+		task.ExecConfig.Silent = silent
+		task.ExecConfig.Quiet = quiet
+
+		if silent {
+			zerolog.SetGlobalLevel(zerolog.Disabled)
+		}
+
+		// start timing
+		start := time.Now()
+
+		reader, err := core.BuildDBReader(task.ExecConfig.Config.SourceConn.ParsedUrl)
+		if err != nil {
+			return err
+		}
+		defer reader.Close()
+
+		// add progress bar
+		var bar *progressbar.ProgressBar
+		if quiet || silent {
+			bar = progressbar.DefaultBytesSilent(-1)
+		} else {
+			bar = progressbar.DefaultBytes(-1, "Writing data")
+			progressbar.OptionSetSpinnerChangeInterval(1 * time.Second)(bar)
+		}
+
+		path, writer, err := file.GetPathAndIO(task.ExecConfig.Config.DestConn.ParsedUrl, bar, sConfig.Filename, sConfig.Compression, sConfig.Format)
 		if err != nil {
 			return fmt.Errorf("error running task: %v", err)
 		}
+		defer writer.Close()
+		log.Info().Msgf("Writing to %s", path)
+
+		// create datastream
+		datastream, err := reader.CreateDataStream(ctx, task.ExecConfig.Config.SourceConn.ParsedUrl, task.ExecConfig.Config.StreamConfig)
+		if err != nil {
+			return err
+		}
+
+		fileWriter, err := file.AddFileWriter(sConfig.Format, datastream, writer)
+		if err != nil {
+			return err
+		}
+
+		core.Execute(ctx, task, datastream, reader, fileWriter)
+		defer fileWriter.Close()
+		elapsed := time.Since(start)
+		log.Info().
+			Str("path", path.String()).
+			Int("rows", datastream.TotalRows).
+			Dur("elapsed", elapsed).
+			Str("duration", elapsed.String()).
+			Float64("bytes", bar.State().CurrentBytes).
+			Msg("Finished writing data")
+
 		return nil
 	},
 }
