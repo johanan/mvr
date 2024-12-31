@@ -205,7 +205,25 @@ func NewStreamConfigFromYaml(data []byte) (*StreamConfig, error) {
 	return &streamConfig, nil
 }
 
+type TemplateString struct {
+	Raw string
+}
+
+func (t *TemplateString) UnmarshalYAML(unmarshal func(interface{}) error) error {
+	return unmarshal(&t.Raw)
+}
+
+type RawStreamConfig struct {
+	Filename  TemplateString `yaml:"filename"`
+	BatchSize int            `yaml:"batch_size"`
+}
+
 func BuildConfig(data []byte, cliArgs *StreamConfig) (*StreamConfig, error) {
+	var rawConfig RawStreamConfig
+	if err := yaml.Unmarshal(data, &rawConfig); err != nil {
+		return nil, fmt.Errorf("error parsing raw yaml: %v", err)
+	}
+
 	first, err := ParseAndExecuteTemplate(data, &StreamConfig{})
 	if err != nil {
 		return nil, fmt.Errorf("error parsing template: %v", err)
@@ -214,6 +232,10 @@ func BuildConfig(data []byte, cliArgs *StreamConfig) (*StreamConfig, error) {
 	sConfig, err := NewStreamConfigFromYaml(first)
 	if err != nil {
 		return nil, fmt.Errorf("error parsing config: %v", err)
+	}
+
+	if rawConfig.Filename.Raw != "" {
+		sConfig.Filename = rawConfig.Filename.Raw
 	}
 	sConfig.OverrideValues(cliArgs)
 	// create a yaml representation of the config

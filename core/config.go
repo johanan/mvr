@@ -1,7 +1,6 @@
 package core
 
 import (
-	"io"
 	"net/url"
 
 	"github.com/johanan/mvr/data"
@@ -22,8 +21,9 @@ type Config struct {
 
 type ExecutionConfig struct {
 	Config      *Config
-	WriterPipe  *io.PipeWriter
 	Concurrency int
+	Silent      bool
+	Quiet       bool
 }
 
 func parseConnection(urlString string) *Connection {
@@ -43,7 +43,6 @@ func NewConfig(source, dest string, streamConfig *data.StreamConfig) *Config {
 func NewExecutionConfig(config *Config, concurrency int) *ExecutionConfig {
 	return &ExecutionConfig{
 		Config:      config,
-		WriterPipe:  nil,
 		Concurrency: concurrency,
 	}
 }
