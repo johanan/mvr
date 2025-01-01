@@ -1,0 +1,15 @@
+format: parquet
+filename: "{{ YYYY }}/{{stream_name}}{{ext}}"
+compression: snappy
+
+tables:
+  - stream_name: public.users
+  - stream_name: public.numbers
+    format: jsonl
+    compression: gzip
+    sql: |
+      SELECT * FROM public.numbers LIMIT 1000
+  - stream_name: public.strings
+    columns:
+      - name: "array_value"
+        database_type: "JSONB"

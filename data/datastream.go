@@ -30,6 +30,11 @@ type StreamConfig struct {
 	BatchSize   int `json:"batch_size,omitempty" yaml:"batch_size,omitempty"`
 }
 
+type MultiStreamConfig struct {
+	StreamConfig `json:",inline" yaml:",inline"`
+	Tables       []StreamConfig `json:"tables" yaml:"tables"`
+}
+
 type Param struct {
 	Value string `json:"value" yaml:"value"`
 	Type  string `json:"type" yaml:"type"`
@@ -113,6 +118,14 @@ func (sc *StreamConfig) OverrideValues(cliArgs *StreamConfig) {
 
 	if cliArgs.BatchSize != 0 {
 		sc.BatchSize = cliArgs.BatchSize
+	}
+
+	if len(cliArgs.Columns) > 0 {
+		sc.Columns = cliArgs.Columns
+	}
+
+	if len(cliArgs.Params) > 0 {
+		sc.Params = cliArgs.Params
 	}
 }
 
@@ -253,11 +266,6 @@ func BuildConfig(data []byte, cliArgs *StreamConfig) (*StreamConfig, error) {
 	sConfig, err = NewStreamConfigFromYaml(config)
 	if err != nil {
 		return nil, fmt.Errorf("error parsing config: %v", err)
-	}
-
-	err = sConfig.Validate()
-	if err != nil {
-		return nil, fmt.Errorf("error validating config: %v", err)
 	}
 
 	return sConfig, nil

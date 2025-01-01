@@ -85,7 +85,6 @@ func Execute(ctx context.Context, concurrency int, config *data.StreamConfig, da
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	defer reader.Close()
 	defer writer.Close()
 	errCh := make(chan error, concurrency+1)
 

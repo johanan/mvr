@@ -74,6 +74,8 @@ params:
 			// actually query the database
 			sc, err := data.BuildConfig([]byte(tt.yaml), &data.StreamConfig{})
 			assert.NoError(t, err)
+			err = sc.Validate()
+			assert.NoError(t, err)
 			local_url, _ := url.Parse(local_db_url)
 
 			pgr, _ := database.NewPGDataReader(local_url)
@@ -175,6 +177,8 @@ params:
 			// https://learn.microsoft.com/en-us/sql/t-sql/data-types/json-data-type?view=azuresqldb-current
 			// so we will override the types here
 			sc, err := data.BuildConfig([]byte(tt.yaml), &data.StreamConfig{})
+			assert.NoError(t, err)
+			err = sc.Validate()
 			assert.NoError(t, err)
 			local_url, _ := url.Parse(local_ms_url)
 
