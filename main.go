@@ -7,6 +7,7 @@ import (
 	"syscall"
 
 	"github.com/johanan/mvr/cmd"
+	"github.com/rs/zerolog/log"
 )
 
 func main() {
@@ -26,6 +27,8 @@ func main() {
 	}()
 
 	if err := cmd.Execute(ctx); err != nil {
+		cancel()
+		log.Fatal().Msgf("Failed to execute command: %v", err)
 		os.Exit(1)
 	}
 }

@@ -284,26 +284,32 @@ func SortKeys(params []string) {
 	})
 }
 
-func (ds *DataStream) BatchesToWriter(writer DataWriter) {
+func (ds *DataStream) BatchesToWriter(ctx context.Context, writer DataWriter) error {
 	for batch := range ds.BatchChan {
-		ds.Mux.Lock()
-		for _, row := range batch.Rows {
-			err := writer.WriteRow(row)
-			ds.TotalRows++
-			if err != nil {
-				log.Fatal().Msgf("Failed to write row: %v", err)
+		select {
+		case <-ctx.Done():
+			log.Trace().Msg("Context done")
+			return ctx.Err()
+		default:
+			ds.Mux.Lock()
+			for _, row := range batch.Rows {
+				err := writer.WriteRow(row)
+				ds.TotalRows++
+				if err != nil {
+					log.Fatal().Msgf("Failed to write row: %v", err)
+				}
 			}
-		}
 
-		err := writer.Flush()
-		if err != nil {
-			log.Fatal().Msgf("Failed to flush writer: %v", err)
-		}
+			err := writer.Flush()
+			if err != nil {
+				return err
+			}
 
-		ds.Mux.Unlock()
-		log.Trace().Int("total_rows", ds.TotalRows).Msg("Batch written")
+			ds.Mux.Unlock()
+			log.Trace().Int("total_rows", ds.TotalRows).Msg("Batch written")
+		}
 	}
-	log.Trace().Msg("All batches written")
+	return nil
 }
 
 func OverrideColumns(original []Column, overrides []Column) []Column {
