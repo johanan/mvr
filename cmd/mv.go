@@ -65,6 +65,11 @@ var mvCmd = &cobra.Command{
 			return fmt.Errorf("error parsing template: %v", err)
 		}
 
+		err = sConfig.Validate()
+		if err != nil {
+			return fmt.Errorf("error validating config: %v", err)
+		}
+
 		task, err := core.SetupMv(sConfig)
 		if err != nil {
 			return fmt.Errorf("error setting up task: %v", err)

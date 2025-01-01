@@ -10,10 +10,10 @@
             "request": "launch",
             "mode": "auto",
             "program": "${fileDirname}",
-            "args": ["mv", "-f", "${fileDirname}/tests/test.yaml","-d"],
+            "args": ["mvs", "--config", "${fileDirname}/tests/multi.yaml","-d"],
             "env": {
                 "MVR_SOURCE": "postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable",
-                "MVR_DEST": "stdout://",
+                "MVR_DEST": "file://",
                 "MVR_TRACE": "false",
             },
         }

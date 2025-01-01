@@ -30,7 +30,7 @@ func NewProgressBar() *progressbar.ProgressBar {
 		}),
 		progressbar.OptionSpinnerType(14),
 		progressbar.OptionFullWidth(),
-		progressbar.OptionSetRenderBlankState(true),
+		progressbar.OptionSetRenderBlankState(false),
 		progressbar.OptionSetSpinnerChangeInterval(1*time.Second),
 	)
 }
