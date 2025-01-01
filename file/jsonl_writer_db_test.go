@@ -77,7 +77,7 @@ func TestJsonlWriter_FromPG(t *testing.T) {
 			rg.Add(1)
 			go func() {
 				defer rg.Done()
-				pgDs.BatchesToWriter(writer)
+				pgDs.BatchesToWriter(ctx, writer)
 			}()
 			rg.Wait()
 
@@ -159,7 +159,7 @@ func TestJsonlWriter_FromMS(t *testing.T) {
 			rg.Add(1)
 			go func() {
 				defer rg.Done()
-				msDs.BatchesToWriter(writer)
+				msDs.BatchesToWriter(ctx, writer)
 			}()
 			rg.Wait()
 

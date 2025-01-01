@@ -93,8 +93,7 @@ var mvCmd = &cobra.Command{
 		if quiet || silent {
 			bar = progressbar.DefaultBytesSilent(-1)
 		} else {
-			bar = progressbar.DefaultBytes(-1, "Writing data")
-			progressbar.OptionSetSpinnerChangeInterval(1 * time.Second)(bar)
+			bar = file.NewProgressBar()
 		}
 
 		path, writer, err := file.GetPathAndIO(task.ExecConfig.Config.DestConn.ParsedUrl, bar, sConfig.Filename, sConfig.Compression, sConfig.Format)
@@ -115,8 +114,9 @@ var mvCmd = &cobra.Command{
 			return err
 		}
 
-		core.Execute(ctx, task, datastream, reader, fileWriter)
-		defer fileWriter.Close()
+		core.Execute(ctx, task.ExecConfig.Concurrency, sConfig, datastream, reader, fileWriter)
+		fileWriter.Close()
+		bar.Finish()
 		elapsed := time.Since(start)
 		log.Info().
 			Str("path", path.String()).

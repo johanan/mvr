@@ -324,7 +324,7 @@ func Test_FullRoundTrip_ToPG(t *testing.T) {
 			rg.Add(1)
 			go func() {
 				defer rg.Done()
-				pgDs.BatchesToWriter(writer)
+				pgDs.BatchesToWriter(ctx, writer)
 			}()
 			rg.Wait()
 			writer.Close()
@@ -337,6 +337,9 @@ func Test_FullRoundTrip_ToPG(t *testing.T) {
 
 func TestParquetWriter(t *testing.T) {
 	var buf bytes.Buffer
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	batchChan := make(chan data.Batch, 10)
 	ds := &data.DataStream{
@@ -367,7 +370,7 @@ func TestParquetWriter(t *testing.T) {
 	rg.Add(1)
 	go func() {
 		defer rg.Done()
-		ds.BatchesToWriter(pdw)
+		ds.BatchesToWriter(ctx, pdw)
 	}()
 	rg.Wait()
 

@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/url"
 	"os"
 	"runtime"
@@ -80,33 +81,53 @@ func BuildDBReader(connURL *url.URL) (data.DBReaderConn, error) {
 	return reader, nil
 }
 
-func Execute(ctx context.Context, task *Task, datastream *data.DataStream, reader data.DBReaderConn, writer data.DataWriter) error {
+func Execute(ctx context.Context, concurrency int, config *data.StreamConfig, datastream *data.DataStream, reader data.DBReaderConn, writer data.DataWriter) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	defer reader.Close()
+	defer writer.Close()
+	errCh := make(chan error, concurrency+1)
+
+	defer func() {
+		if err := writer.Flush(); err != nil {
+			log.Fatal().Msgf("Failed to flush writer: %v", err)
+		}
+		log.Trace().Msg("Flushed writer")
+	}()
 
 	var wg sync.WaitGroup
 
-	for i := 0; i < task.ExecConfig.Concurrency; i++ {
+	for i := 0; i < concurrency; i++ {
 		wg.Add(1)
 		go func(workedId int) {
 			defer wg.Done()
-			datastream.BatchesToWriter(writer)
+			if err := datastream.BatchesToWriter(ctx, writer); err != nil {
+				errCh <- fmt.Errorf("worker %d: %w", i, err)
+				cancel()
+			}
+			datastream.BatchesToWriter(ctx, writer)
+			log.Trace().Int("worker", i).Msg("All batches written")
 		}(i)
 	}
-
-	config := task.ExecConfig.Config.StreamConfig
 
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		if err := reader.ExecuteDataStream(ctx, datastream, config); err != nil {
-			log.Printf("ExecuteDataStream error: %v", err)
+			errCh <- fmt.Errorf("reader: %w", err)
+			cancel()
 		}
 	}()
 
 	wg.Wait()
+	close(errCh)
+	log.Trace().Msg("All workers have finished")
 
-	if err := writer.Flush(); err != nil {
-		log.Fatal().Msgf("Failed to flush writer: %v", err)
+	for err := range errCh {
+		if err != nil {
+			return err
+		}
 	}
 
 	return nil

@@ -9,9 +9,31 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/johanan/mvr/data"
+	"github.com/schollz/progressbar/v3"
 )
+
+func NewProgressBar() *progressbar.ProgressBar {
+	return progressbar.NewOptions64(
+		-1,
+		progressbar.OptionSetDescription("Writing data"),
+		progressbar.OptionSetWriter(os.Stderr),
+		progressbar.OptionShowBytes(true),
+		progressbar.OptionShowTotalBytes(true),
+		progressbar.OptionSetWidth(10),
+		progressbar.OptionThrottle(1*time.Second),
+		progressbar.OptionShowCount(),
+		progressbar.OptionOnCompletion(func() {
+			fmt.Fprint(os.Stderr, "\n")
+		}),
+		progressbar.OptionSpinnerType(14),
+		progressbar.OptionFullWidth(),
+		progressbar.OptionSetRenderBlankState(true),
+		progressbar.OptionSetSpinnerChangeInterval(1*time.Second),
+	)
+}
 
 func BuildFullPath(parsed *url.URL, filename string) (*url.URL, error) {
 	switch parsed.Scheme {
