@@ -91,7 +91,6 @@ func Execute(ctx context.Context, concurrency int, config *data.StreamConfig, da
 				errCh <- fmt.Errorf("worker %d: %w", i, err)
 				cancel()
 			}
-			datastream.BatchesToWriter(ctx, writer)
 			log.Trace().Int("worker", i).Msg("All batches written")
 		}(i)
 	}

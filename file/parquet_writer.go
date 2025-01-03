@@ -97,7 +97,7 @@ func checkType(col data.Column) MappedType {
 
 func NewParquetDataWriter(datastream *data.DataStream, ioWriter io.Writer) *ParquetDataWriter {
 	columnCount := len(datastream.DestColumns)
-	rowGroupSize := 1000000
+	rowGroupSize := 100000
 
 	columnBuffers := make([]interface{}, columnCount)
 	definitionLevels := make([][]int16, columnCount)

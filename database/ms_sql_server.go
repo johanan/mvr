@@ -75,6 +75,10 @@ func (reader *MSDataReader) ExecuteDataStream(ctx context.Context, ds *DataStrea
 	defer rows.Close()
 
 	batch := Batch{Rows: make([][]any, 0, ds.BatchSize)}
+	defer func() {
+		close(ds.BatchChan)
+		log.Debug().Msg("Closed batch channel")
+	}()
 
 	for rows.Next() {
 		row := make([]any, len(ds.Columns))
@@ -124,8 +128,6 @@ func (reader *MSDataReader) ExecuteDataStream(ctx context.Context, ds *DataStrea
 	}
 
 	log.Debug().Msg("Finished reading rows")
-	close(ds.BatchChan)
-	log.Debug().Msg("Closed batch channel")
 
 	return nil
 }
