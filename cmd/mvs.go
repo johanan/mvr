@@ -3,7 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"strings"
+	"runtime"
 	"time"
 
 	"github.com/johanan/mvr/core"
@@ -28,15 +28,21 @@ var mvsCmd = &cobra.Command{
 		ctx := cmd.Context()
 		debug, _ := cmd.Flags().GetBool("debug")
 		if debug {
-			log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
 			zerolog.SetGlobalLevel(zerolog.DebugLevel)
-		} else {
-			zerolog.SetGlobalLevel(zerolog.InfoLevel)
 		}
 
-		// check environment for trace flag
-		if strings.ToLower(os.Getenv("MVR_TRACE")) == "true" {
-			zerolog.SetGlobalLevel(zerolog.TraceLevel)
+		logLevel, _ := cmd.Flags().GetString("log-level")
+		if logLevel != "" {
+			lvl, err := zerolog.ParseLevel(logLevel)
+			if err != nil {
+				log.Warn().Msgf("not a valid log level: %s", logLevel)
+			}
+			zerolog.SetGlobalLevel(lvl)
+		}
+
+		console, _ := cmd.Flags().GetBool("console")
+		if console {
+			log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
 		}
 
 		var multiConfig data.MultiStreamConfig
@@ -60,12 +66,12 @@ var mvsCmd = &cobra.Command{
 			return fmt.Errorf("error marshalling config: %v", err)
 		}
 
-		task, err := core.SetupMv(&multiConfig.StreamConfig)
+		config, err := core.SetupConfig(&multiConfig.StreamConfig)
 		if err != nil {
 			return fmt.Errorf("error setting up task: %v", err)
 		}
 
-		reader, err := core.BuildDBReader(task.ExecConfig.Config.SourceConn.ParsedUrl)
+		reader, err := core.BuildDBReader(config.SourceConn.ParsedUrl)
 		if err != nil {
 			return err
 		}
@@ -73,8 +79,14 @@ var mvsCmd = &cobra.Command{
 
 		silent, _ := cmd.Flags().GetBool("silent")
 		quiet, _ := cmd.Flags().GetBool("quiet")
-		task.ExecConfig.Silent = silent
-		task.ExecConfig.Quiet = quiet
+		cliConcurrency, _ := cmd.Flags().GetInt("concurrency")
+
+		var concurrency int
+		if cliConcurrency > 0 {
+			concurrency = cliConcurrency
+		} else {
+			concurrency = runtime.NumCPU()
+		}
 
 		if silent {
 			zerolog.SetGlobalLevel(zerolog.Disabled)
@@ -102,14 +114,14 @@ var mvsCmd = &cobra.Command{
 				bar = file.NewProgressBar()
 			}
 
-			path, writer, err := file.GetPathAndIO(task.ExecConfig.Config.DestConn.ParsedUrl, bar, sConfig.Filename, sConfig.Compression, sConfig.Format)
+			path, writer, err := file.GetPathAndIO(config.DestConn.ParsedUrl, bar, sConfig.Filename, sConfig.Compression, sConfig.Format)
 			if err != nil {
 				return fmt.Errorf("error running task: %v", err)
 			}
 			defer writer.Close()
 			log.Info().Msgf("Writing to %s", path)
 
-			datastream, err := reader.CreateDataStream(ctx, task.ExecConfig.Config.SourceConn.ParsedUrl, sConfig)
+			datastream, err := reader.CreateDataStream(ctx, config.SourceConn.ParsedUrl, sConfig)
 			if err != nil {
 				return err
 			}
@@ -119,7 +131,7 @@ var mvsCmd = &cobra.Command{
 				return err
 			}
 
-			core.Execute(ctx, task.ExecConfig.Concurrency, sConfig, datastream, reader, fileWriter)
+			core.Execute(ctx, concurrency, sConfig, datastream, reader, fileWriter)
 			fileWriter.Close()
 			bar.Finish()
 			elapsed := time.Since(start)

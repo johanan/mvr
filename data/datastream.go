@@ -308,14 +308,13 @@ func (ds *DataStream) BatchesToWriter(ctx context.Context, writer DataWriter) er
 				}
 			}
 
-			err := writer.Flush()
-			if err != nil {
-				return err
-			}
-
 			ds.Mux.Unlock()
 			log.Trace().Int("total_rows", ds.TotalRows).Msg("Batch written")
 		}
+	}
+	err := writer.Flush()
+	if err != nil {
+		return err
 	}
 	return nil
 }
