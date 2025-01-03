@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"runtime"
-	"strings"
 	"time"
 
 	"github.com/johanan/mvr/core"
@@ -31,15 +30,21 @@ var mvCmd = &cobra.Command{
 		ctx := cmd.Context()
 		debug, _ := cmd.Flags().GetBool("debug")
 		if debug {
-			log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
 			zerolog.SetGlobalLevel(zerolog.DebugLevel)
-		} else {
-			zerolog.SetGlobalLevel(zerolog.InfoLevel)
 		}
 
-		// check environment for trace flag
-		if strings.ToLower(os.Getenv("MVR_TRACE")) == "true" {
-			zerolog.SetGlobalLevel(zerolog.TraceLevel)
+		logLevel, _ := cmd.Flags().GetString("log-level")
+		if logLevel != "" {
+			lvl, err := zerolog.ParseLevel(logLevel)
+			if err != nil {
+				log.Warn().Msgf("not a valid log level: %s", logLevel)
+			}
+			zerolog.SetGlobalLevel(lvl)
+		}
+
+		console, _ := cmd.Flags().GetBool("console")
+		if console {
+			log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
 		}
 
 		var templateData []byte
