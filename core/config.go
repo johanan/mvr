@@ -19,13 +19,6 @@ type Config struct {
 	StreamConfig *data.StreamConfig `json:"stream_config,omitempty" yaml:"stream_config,omitempty"`
 }
 
-type ExecutionConfig struct {
-	Config      *Config
-	Concurrency int
-	Silent      bool
-	Quiet       bool
-}
-
 func parseConnection(urlString string) *Connection {
 	parse, err := url.Parse(urlString)
 	if err != nil {
@@ -38,11 +31,4 @@ func NewConfig(source, dest string, streamConfig *data.StreamConfig) *Config {
 	sourceConn := parseConnection(source)
 	destConn := parseConnection(dest)
 	return &Config{Source: source, Dest: dest, StreamConfig: streamConfig, SourceConn: sourceConn, DestConn: destConn}
-}
-
-func NewExecutionConfig(config *Config, concurrency int) *ExecutionConfig {
-	return &ExecutionConfig{
-		Config:      config,
-		Concurrency: concurrency,
-	}
 }

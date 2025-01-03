@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/url"
 	"os"
-	"runtime"
 	"sync"
 
 	"github.com/johanan/mvr/data"
@@ -15,17 +14,7 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-type Task struct {
-	ExecConfig *ExecutionConfig
-}
-
-func NewTask(exec ExecutionConfig) *Task {
-	return &Task{
-		ExecConfig: &exec,
-	}
-}
-
-func SetupMv(sConfig *data.StreamConfig) (*Task, error) {
+func SetupConfig(sConfig *data.StreamConfig) (*Config, error) {
 	connData := os.Getenv("MVR_SOURCE")
 	if connData == "" {
 		return nil, errors.New("source connection string is required")
@@ -54,10 +43,7 @@ func SetupMv(sConfig *data.StreamConfig) (*Task, error) {
 	}
 
 	config := NewConfig(string(connStr), string(destStr), sConfig)
-	numCores := runtime.NumCPU()
-	runtime.GOMAXPROCS(numCores)
-	execConfig := NewExecutionConfig(config, numCores)
-	return NewTask(*execConfig), nil
+	return config, nil
 }
 
 func BuildDBReader(connURL *url.URL) (data.DBReaderConn, error) {

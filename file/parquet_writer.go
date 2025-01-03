@@ -31,6 +31,7 @@ type ParquetDataWriter struct {
 	definitionLevels [][]int16
 	rowCount         int
 	mux              sync.Mutex
+	rowGroupSize     int
 }
 
 type ParquetDecimal struct {
@@ -96,15 +97,15 @@ func checkType(col data.Column) MappedType {
 
 func NewParquetDataWriter(datastream *data.DataStream, ioWriter io.Writer) *ParquetDataWriter {
 	columnCount := len(datastream.DestColumns)
-	maxRows := 100
+	rowGroupSize := 1000000
 
 	columnBuffers := make([]interface{}, columnCount)
 	definitionLevels := make([][]int16, columnCount)
 
 	for i := 0; i < columnCount; i++ {
 		mapped := checkType(datastream.DestColumns[i])
-		columnBuffers[i] = reflect.MakeSlice(reflect.SliceOf(mapped.GoType), 0, maxRows).Interface()
-		definitionLevels[i] = make([]int16, maxRows)
+		columnBuffers[i] = reflect.MakeSlice(reflect.SliceOf(mapped.GoType), 0, rowGroupSize).Interface()
+		definitionLevels[i] = make([]int16, rowGroupSize)
 	}
 
 	nodes := make([]schema.Node, columnCount)
@@ -123,7 +124,7 @@ func NewParquetDataWriter(datastream *data.DataStream, ioWriter io.Writer) *Parq
 	fileProp := file.WithWriterProps(prop)
 	writer := file.NewParquetWriter(ioWriter, s.Root(), fileProp)
 
-	return &ParquetDataWriter{datastream: datastream, writer: writer, columnBuffers: columnBuffers, definitionLevels: definitionLevels, rowCount: 0}
+	return &ParquetDataWriter{datastream: datastream, writer: writer, columnBuffers: columnBuffers, definitionLevels: definitionLevels, rowCount: 0, rowGroupSize: rowGroupSize}
 }
 
 func (pw *ParquetDataWriter) WriteRow(row []any) error {
@@ -270,7 +271,7 @@ func (pw *ParquetDataWriter) WriteRow(row []any) error {
 
 	pw.rowCount++
 
-	if pw.rowCount >= 100 {
+	if pw.rowCount >= pw.rowGroupSize {
 		err := pw.writeBatch()
 		if err != nil {
 			return err
@@ -279,8 +280,8 @@ func (pw *ParquetDataWriter) WriteRow(row []any) error {
 		pw.rowCount = 0
 		for i := range pw.datastream.DestColumns {
 			mapped := checkType(pw.datastream.DestColumns[i])
-			pw.columnBuffers[i] = reflect.MakeSlice(reflect.SliceOf(mapped.GoType), 0, 100).Interface()
-			pw.definitionLevels[i] = make([]int16, 100)
+			pw.columnBuffers[i] = reflect.MakeSlice(reflect.SliceOf(mapped.GoType), 0, pw.rowGroupSize).Interface()
+			pw.definitionLevels[i] = make([]int16, pw.rowGroupSize)
 		}
 	}
 
@@ -297,8 +298,8 @@ func (pw *ParquetDataWriter) Flush() error {
 		pw.rowCount = 0
 		for i := range pw.datastream.DestColumns {
 			mapped := checkType(pw.datastream.DestColumns[i])
-			pw.columnBuffers[i] = reflect.MakeSlice(reflect.SliceOf(mapped.GoType), 0, 100).Interface()
-			pw.definitionLevels[i] = make([]int16, 100)
+			pw.columnBuffers[i] = reflect.MakeSlice(reflect.SliceOf(mapped.GoType), 0, pw.rowGroupSize).Interface()
+			pw.definitionLevels[i] = make([]int16, pw.rowGroupSize)
 		}
 	}
 	return nil
@@ -405,6 +406,21 @@ func convertToParquetDecimal(value any, precision, scale int) (ParquetDecimal, e
 		// I tried big float but it was not working
 		float := v.StringFixed(int32(scale))
 		return convertToParquetDecimal(float, precision, scale)
+
+	case *big.Int:
+		switch {
+		case precision <= 9:
+			return ParquetDecimal{Type: Int32Decimal, Int32Val: int32(v.Int64())}, nil
+		case precision <= 18:
+			return ParquetDecimal{Type: Int64Decimal, Int64Val: v.Int64()}, nil
+		default:
+			byteArray, err := bigIntToFixedBytes(v, precision)
+			if err != nil {
+				return result, err
+			}
+			return ParquetDecimal{Type: ByteArrayDecimal, ByteArrayVal: byteArray}, nil
+		}
+
 	case *big.Float:
 		// Convert *big.Float to unscaled int
 		unscaledInt := convertBigFloatToUnscaledInt(v, scale)

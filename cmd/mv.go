@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"runtime"
 	"strings"
 	"time"
 
@@ -70,15 +71,21 @@ var mvCmd = &cobra.Command{
 			return fmt.Errorf("error validating config: %v", err)
 		}
 
-		task, err := core.SetupMv(sConfig)
+		config, err := core.SetupConfig(sConfig)
 		if err != nil {
 			return fmt.Errorf("error setting up task: %v", err)
 		}
 
 		silent, _ := cmd.Flags().GetBool("silent")
 		quiet, _ := cmd.Flags().GetBool("quiet")
-		task.ExecConfig.Silent = silent
-		task.ExecConfig.Quiet = quiet
+		cliConcurrency, _ := cmd.Flags().GetInt("concurrency")
+
+		var concurrency int
+		if cliConcurrency > 0 {
+			concurrency = cliConcurrency
+		} else {
+			concurrency = runtime.NumCPU()
+		}
 
 		if silent {
 			zerolog.SetGlobalLevel(zerolog.Disabled)
@@ -87,7 +94,7 @@ var mvCmd = &cobra.Command{
 		// start timing
 		start := time.Now()
 
-		reader, err := core.BuildDBReader(task.ExecConfig.Config.SourceConn.ParsedUrl)
+		reader, err := core.BuildDBReader(config.SourceConn.ParsedUrl)
 		if err != nil {
 			return err
 		}
@@ -101,7 +108,7 @@ var mvCmd = &cobra.Command{
 			bar = file.NewProgressBar()
 		}
 
-		path, writer, err := file.GetPathAndIO(task.ExecConfig.Config.DestConn.ParsedUrl, bar, sConfig.Filename, sConfig.Compression, sConfig.Format)
+		path, writer, err := file.GetPathAndIO(config.DestConn.ParsedUrl, bar, sConfig.Filename, sConfig.Compression, sConfig.Format)
 		if err != nil {
 			return fmt.Errorf("error running task: %v", err)
 		}
@@ -109,7 +116,7 @@ var mvCmd = &cobra.Command{
 		log.Info().Msgf("Writing to %s", path)
 
 		// create datastream
-		datastream, err := reader.CreateDataStream(ctx, task.ExecConfig.Config.SourceConn.ParsedUrl, task.ExecConfig.Config.StreamConfig)
+		datastream, err := reader.CreateDataStream(ctx, config.SourceConn.ParsedUrl, config.StreamConfig)
 		if err != nil {
 			return err
 		}
@@ -119,7 +126,7 @@ var mvCmd = &cobra.Command{
 			return err
 		}
 
-		core.Execute(ctx, task.ExecConfig.Concurrency, sConfig, datastream, reader, fileWriter)
+		core.Execute(ctx, concurrency, sConfig, datastream, reader, fileWriter)
 		fileWriter.Close()
 		bar.Finish()
 		elapsed := time.Since(start)
