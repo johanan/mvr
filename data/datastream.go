@@ -28,6 +28,7 @@ type StreamConfig struct {
 	Params      map[string]Param `json:"params,omitempty" yaml:"params,omitempty"`
 	ParamKeys   []string
 	BatchSize   int `json:"batch_size,omitempty" yaml:"batch_size,omitempty"`
+	BatchCount  int `json:"batch_count,omitempty" yaml:"batch_count,omitempty"`
 }
 
 type MultiStreamConfig struct {
@@ -64,8 +65,12 @@ type DataStream struct {
 	DestColumns []Column
 }
 
+type BatchWriter interface {
+	WriteBatch(batch Batch) error
+}
+
 type DataWriter interface {
-	WriteRow(row []any) error
+	CreateBatchWriter() BatchWriter
 	Flush() error
 	Close() error
 }
@@ -81,6 +86,13 @@ func (sc *StreamConfig) GetBatchSize() int {
 		return 100000
 	}
 	return sc.BatchSize
+}
+
+func (sc *StreamConfig) GetBatchCount() int {
+	if sc.BatchCount == 0 {
+		return 10
+	}
+	return sc.BatchCount
 }
 
 func (sc *StreamConfig) Validate() error {
@@ -292,30 +304,24 @@ func SortKeys(params []string) {
 	})
 }
 
-func (ds *DataStream) BatchesToWriter(ctx context.Context, writer DataWriter) error {
+func (ds *DataStream) BatchesToWriter(ctx context.Context, writer BatchWriter) error {
 	for batch := range ds.BatchChan {
 		select {
 		case <-ctx.Done():
 			log.Trace().Msg("Context done")
 			return ctx.Err()
 		default:
-			ds.Mux.Lock()
-			for _, row := range batch.Rows {
-				err := writer.WriteRow(row)
-				ds.TotalRows++
-				if err != nil {
-					log.Fatal().Msgf("Failed to write row: %v", err)
-				}
+			err := writer.WriteBatch(batch)
+			if err != nil {
+				return err
 			}
-
+			ds.Mux.Lock()
+			ds.TotalRows += len(batch.Rows)
 			ds.Mux.Unlock()
-			log.Trace().Int("total_rows", ds.TotalRows).Msg("Batch written")
 		}
+		log.Trace().Int("total_rows", ds.TotalRows).Msg("Batch written")
 	}
-	err := writer.Flush()
-	if err != nil {
-		return err
-	}
+
 	return nil
 }
 

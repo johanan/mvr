@@ -114,7 +114,7 @@ func AddCSV(ds *data.DataStream, writer io.Writer) *CSVDataWriter {
 }
 
 func AddJSONL(ds *data.DataStream, writer io.Writer) *JSONLWriter {
-	return &JSONLWriter{datastream: ds, writer: writer}
+	return NewJSONLWriter(ds, writer)
 }
 
 func AddParquet(ds *data.DataStream, writer io.Writer) *ParquetDataWriter {

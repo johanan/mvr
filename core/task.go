@@ -84,10 +84,11 @@ func Execute(ctx context.Context, concurrency int, config *data.StreamConfig, da
 	var wg sync.WaitGroup
 
 	for i := 0; i < concurrency; i++ {
+		bw := writer.CreateBatchWriter()
 		wg.Add(1)
 		go func(workedId int) {
 			defer wg.Done()
-			if err := datastream.BatchesToWriter(ctx, writer); err != nil {
+			if err := datastream.BatchesToWriter(ctx, bw); err != nil {
 				errCh <- fmt.Errorf("worker %d: %w", i, err)
 				cancel()
 			}

@@ -69,7 +69,7 @@ func (sf *SnowflakeDataReader) CreateDataStream(ctx context.Context, connUrl *ur
 		destColumns = data.OverrideColumns(destColumns, config.Columns)
 	}
 
-	batchChan := make(chan Batch, 10)
+	batchChan := make(chan Batch, config.GetBatchCount())
 	logColumns(columns, destColumns)
 	return &DataStream{TotalRows: 0, BatchChan: batchChan, BatchSize: config.GetBatchSize(), Columns: columns, DestColumns: destColumns}, nil
 }

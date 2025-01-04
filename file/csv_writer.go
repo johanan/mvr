@@ -3,9 +3,9 @@ package file
 import (
 	"encoding/csv"
 	"encoding/json"
-	"fmt"
 	"io"
 	"log"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -18,9 +18,37 @@ import (
 type CSVDataWriter struct {
 	datastream *data.DataStream
 	writer     *csv.Writer
+	mux        *sync.Mutex
 }
 
-func (cw *CSVDataWriter) WriteRow(row []any) error {
+type CSVBatchWriter struct {
+	dataWriter *CSVDataWriter
+	buffer     [][]string
+}
+
+func (cb *CSVBatchWriter) WriteBatch(batch data.Batch) error {
+	for _, row := range batch.Rows {
+		processed, err := cb.dataWriter.ProcessRow(row)
+		if err != nil {
+			return err
+		}
+		cb.buffer = append(cb.buffer, processed)
+	}
+
+	cb.dataWriter.mux.Lock()
+	defer cb.dataWriter.mux.Unlock()
+	for _, row := range cb.buffer {
+		if err := cb.dataWriter.writer.Write(row); err != nil {
+			return err
+		}
+	}
+	cb.dataWriter.writer.Flush()
+	cb.buffer = cb.buffer[:0]
+
+	return nil
+}
+
+func (cw *CSVDataWriter) ProcessRow(row []any) ([]string, error) {
 	stringRow := make([]string, len(row))
 	for i, col := range row {
 		dest := cw.datastream.DestColumns[i]
@@ -56,7 +84,6 @@ func (cw *CSVDataWriter) WriteRow(row []any) error {
 				}
 				stringRow[i] = string(j)
 			default:
-				fmt.Printf("Unknown type for NUMERIC: %T\n", v)
 				stringRow[i] = cast.ToString(v)
 			}
 		case "UUID":
@@ -97,7 +124,8 @@ func (cw *CSVDataWriter) WriteRow(row []any) error {
 			stringRow[i] = cast.ToString(col)
 		}
 	}
-	return cw.writer.Write(stringRow)
+
+	return stringRow, nil
 }
 
 func (cw *CSVDataWriter) Flush() error {
@@ -108,6 +136,11 @@ func (cw *CSVDataWriter) Flush() error {
 func (cw *CSVDataWriter) Close() error {
 	cw.Flush()
 	return nil
+}
+
+func (cw *CSVDataWriter) CreateBatchWriter() data.BatchWriter {
+	buffer := make([][]string, 0, cw.datastream.BatchSize)
+	return &CSVBatchWriter{dataWriter: cw, buffer: buffer}
 }
 
 func NewCSVDataWriter(datastream *data.DataStream, writer io.Writer) *CSVDataWriter {
@@ -124,5 +157,6 @@ func NewCSVDataWriter(datastream *data.DataStream, writer io.Writer) *CSVDataWri
 	if err != nil {
 		log.Fatalf("Failed to write header: %v", err)
 	}
-	return &CSVDataWriter{datastream: datastream, writer: w}
+
+	return &CSVDataWriter{datastream: datastream, writer: w, mux: &sync.Mutex{}}
 }

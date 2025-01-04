@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
-	"log"
 	"math/big"
 	"net/url"
 	"os"
@@ -13,6 +12,7 @@ import (
 
 	"github.com/apache/arrow/go/v18/parquet"
 	"github.com/apache/arrow/go/v18/parquet/file"
+	"github.com/johanan/mvr/core"
 	"github.com/johanan/mvr/data"
 	"github.com/johanan/mvr/database"
 	"github.com/shopspring/decimal"
@@ -348,26 +348,10 @@ func Test_FullRoundTrip_ToPG(t *testing.T) {
 			pgDs, _ := pgr.CreateDataStream(ctx, local_url, sc)
 			defer pgr.Close()
 
-			rg := sync.WaitGroup{}
-
-			rg.Add(1)
-			go func() {
-				defer rg.Done()
-				if err := pgr.ExecuteDataStream(ctx, pgDs, sc); err != nil {
-					log.Printf("ExecuteDataStream error: %v", err)
-					cancel()
-				}
-			}()
-
 			writer := NewParquetDataWriter(pgDs, &buf)
 
-			rg.Add(1)
-			go func() {
-				defer rg.Done()
-				pgDs.BatchesToWriter(ctx, writer)
-			}()
-			rg.Wait()
-			writer.Close()
+			err := core.Execute(ctx, 1, sc, pgDs, pgr, writer)
+			assert.NoError(t, err)
 
 			// going to have to come back to this
 		})
@@ -409,8 +393,9 @@ func TestParquetWriter(t *testing.T) {
 	rg := sync.WaitGroup{}
 	rg.Add(1)
 	go func() {
+		bw := pdw.CreateBatchWriter()
 		defer rg.Done()
-		ds.BatchesToWriter(ctx, pdw)
+		ds.BatchesToWriter(ctx, bw)
 	}()
 	rg.Wait()
 

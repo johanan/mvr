@@ -3,14 +3,14 @@ package file
 import (
 	"bytes"
 	"context"
-	"log"
 	"net/url"
 	"os"
-	"sync"
 	"testing"
 
+	"github.com/johanan/mvr/core"
 	"github.com/johanan/mvr/data"
 	"github.com/johanan/mvr/database"
+	"github.com/rs/zerolog"
 	"github.com/zeebo/assert"
 )
 
@@ -70,6 +70,7 @@ params:
 			var buf bytes.Buffer
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
+			zerolog.SetGlobalLevel(zerolog.Disabled)
 
 			// actually query the database
 			sc, err := data.BuildConfig([]byte(tt.yaml), &data.StreamConfig{})
@@ -82,25 +83,10 @@ params:
 			pgDs, _ := pgr.CreateDataStream(ctx, local_url, sc)
 			defer pgr.Close()
 
-			rg := sync.WaitGroup{}
-
-			rg.Add(1)
-			go func() {
-				defer rg.Done()
-				if err := pgr.ExecuteDataStream(ctx, pgDs, sc); err != nil {
-					log.Printf("ExecuteDataStream error: %v", err)
-					cancel()
-				}
-			}()
-
 			writer := NewCSVDataWriter(pgDs, &buf)
 
-			rg.Add(1)
-			go func() {
-				defer rg.Done()
-				pgDs.BatchesToWriter(ctx, writer)
-			}()
-			rg.Wait()
+			err = core.Execute(ctx, 1, sc, pgDs, pgr, writer)
+			assert.NoError(t, err)
 
 			assert.Equal(t, tt.expected, buf.String())
 		})
@@ -172,6 +158,7 @@ params:
 			var buf bytes.Buffer
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
+			zerolog.SetGlobalLevel(zerolog.Disabled)
 
 			// right now only Azure has json types
 			// https://learn.microsoft.com/en-us/sql/t-sql/data-types/json-data-type?view=azuresqldb-current
@@ -187,25 +174,10 @@ params:
 			assert.NoError(t, err)
 			defer msr.Close()
 
-			rg := sync.WaitGroup{}
-
-			rg.Add(1)
-			go func() {
-				defer rg.Done()
-				if err := msr.ExecuteDataStream(ctx, msDs, sc); err != nil {
-					log.Printf("ExecuteDataStream error: %v", err)
-					cancel()
-				}
-			}()
-
 			writer := NewCSVDataWriter(msDs, &buf)
 
-			rg.Add(1)
-			go func() {
-				defer rg.Done()
-				msDs.BatchesToWriter(ctx, writer)
-			}()
-			rg.Wait()
+			err = core.Execute(ctx, 1, sc, msDs, msr, writer)
+			assert.NoError(t, err)
 
 			assert.Equal(t, tt.expected, buf.String())
 		})

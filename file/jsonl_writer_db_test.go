@@ -3,12 +3,11 @@ package file
 import (
 	"bytes"
 	"context"
-	"log"
 	"net/url"
 	"os"
-	"sync"
 	"testing"
 
+	"github.com/johanan/mvr/core"
 	"github.com/johanan/mvr/data"
 	"github.com/johanan/mvr/database"
 	"github.com/zeebo/assert"
@@ -61,25 +60,10 @@ func TestJsonlWriter_FromPG(t *testing.T) {
 			pgDs, _ := pgr.CreateDataStream(ctx, local_url, sc)
 			defer pgr.Close()
 
-			rg := sync.WaitGroup{}
+			writer := NewJSONLWriter(pgDs, &buf)
 
-			rg.Add(1)
-			go func() {
-				defer rg.Done()
-				if err := pgr.ExecuteDataStream(ctx, pgDs, sc); err != nil {
-					log.Printf("ExecuteDataStream error: %v", err)
-					cancel()
-				}
-			}()
-
-			writer := &JSONLWriter{pgDs, &buf}
-
-			rg.Add(1)
-			go func() {
-				defer rg.Done()
-				pgDs.BatchesToWriter(ctx, writer)
-			}()
-			rg.Wait()
+			err := core.Execute(ctx, 1, sc, pgDs, pgr, writer)
+			assert.NoError(t, err)
 
 			assert.Equal(t, tt.expected, buf.String())
 		})
@@ -143,25 +127,10 @@ func TestJsonlWriter_FromMS(t *testing.T) {
 			assert.NoError(t, err)
 			defer msr.Close()
 
-			rg := sync.WaitGroup{}
+			writer := NewJSONLWriter(msDs, &buf)
 
-			rg.Add(1)
-			go func() {
-				defer rg.Done()
-				if err := msr.ExecuteDataStream(ctx, msDs, sc); err != nil {
-					log.Printf("ExecuteDataStream error: %v", err)
-					cancel()
-				}
-			}()
-
-			writer := &JSONLWriter{msDs, &buf}
-
-			rg.Add(1)
-			go func() {
-				defer rg.Done()
-				msDs.BatchesToWriter(ctx, writer)
-			}()
-			rg.Wait()
+			err = core.Execute(ctx, 1, sc, msDs, msr, writer)
+			assert.NoError(t, err)
 
 			assert.Equal(t, tt.expected, buf.String())
 		})
