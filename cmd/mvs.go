@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/johanan/mvr/core"
@@ -20,6 +21,7 @@ var mvsFormat string
 var mvsFilename string
 var mvsCompression string
 var mvsCfgFile string
+var mvsSelect string
 
 var mvsCmd = &cobra.Command{
 	Use:   "mvs",
@@ -92,8 +94,10 @@ var mvsCmd = &cobra.Command{
 			zerolog.SetGlobalLevel(zerolog.Disabled)
 		}
 
-		for i, table := range multiConfig.Tables {
-			log.Info().Msgf("Starting %d/%d", i+1, len(multiConfig.Tables))
+		tablesToProcess := filterTables(multiConfig.Tables, mvsSelect)
+
+		for i, table := range tablesToProcess {
+			log.Info().Msgf("Starting %d/%d", i+1, len(tablesToProcess))
 			// invert so that each table can override the root
 			sConfig, err := data.BuildConfig(multiBytes, &table)
 			if err != nil {
@@ -148,10 +152,32 @@ var mvsCmd = &cobra.Command{
 	},
 }
 
+func filterTables(tables []data.StreamConfig, selectList string) []data.StreamConfig {
+	if selectList == "" {
+		return tables
+	}
+
+	splitList := strings.Split(strings.ToLower(selectList), ",")
+	splitSet := make(map[string]struct{})
+	for _, s := range splitList {
+		splitSet[s] = struct{}{}
+	}
+
+	var selected []data.StreamConfig
+	for _, table := range tables {
+		if _, ok := splitSet[strings.ToLower(table.StreamName)]; ok {
+			selected = append(selected, table)
+		}
+	}
+
+	return selected
+}
+
 func init() {
 	mvsCmd.Flags().StringVar(&mvsCfgFile, "config", "", "Configuration file")
 	mvsCmd.Flags().StringVar(&mvsFormat, "format", "", "Format of the data")
 	mvsCmd.Flags().StringVar(&mvsFilename, "filename", "", "Name of the file")
 	mvsCmd.Flags().StringVar(&mvsCompression, "compression", "", "Compression of the file")
+	mvsCmd.Flags().StringVar(&mvsSelect, "select", "", "Comma separated list of which tables to process")
 	mvsCmd.MarkFlagRequired("config")
 }
