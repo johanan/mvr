@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
-	"log"
+	"math/big"
 	"net/url"
 	"os"
 	"sync"
@@ -12,6 +12,7 @@ import (
 
 	"github.com/apache/arrow/go/v18/parquet"
 	"github.com/apache/arrow/go/v18/parquet/file"
+	"github.com/johanan/mvr/core"
 	"github.com/johanan/mvr/data"
 	"github.com/johanan/mvr/database"
 	"github.com/shopspring/decimal"
@@ -54,6 +55,45 @@ func TestDecimalToFixedBytes(t *testing.T) {
 				assert.NoError(t, err)
 				assert.Equal(t, tc.expected, hex.EncodeToString(converted))
 			}
+		})
+	}
+}
+
+func newBigIntFromString(s string) *big.Int {
+	i := new(big.Int)
+	i.SetString(s, 10)
+	return i
+}
+
+func TestConversionToFixedBytes(t *testing.T) {
+	tests := []struct {
+		name      string
+		value     any
+		scale     int
+		precision int
+		expected  string // Hex representation
+	}{
+		{
+			name:      "Positive Standard",
+			value:     "639529.823302734000000",
+			scale:     15,
+			precision: 38,
+			expected:  "0000000000000022ab4259eb6bcb2f80",
+		},
+		{
+			name: "Positive Standard",
+			// sometimes the value for a decimal is already an int
+			value:     newBigIntFromString("639529"),
+			scale:     15,
+			precision: 38,
+			expected:  "0000000000000000000000000009c229",
+		},
+	}
+	for _, tt := range tests { // capture range variable
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := convertToParquetDecimal(tt.value, tt.precision, tt.scale)
+			assert.NoError(t, err)
+			assert.Equal(t, tt.expected, hex.EncodeToString(result.ByteArrayVal))
 		})
 	}
 }
@@ -308,26 +348,10 @@ func Test_FullRoundTrip_ToPG(t *testing.T) {
 			pgDs, _ := pgr.CreateDataStream(ctx, local_url, sc)
 			defer pgr.Close()
 
-			rg := sync.WaitGroup{}
-
-			rg.Add(1)
-			go func() {
-				defer rg.Done()
-				if err := pgr.ExecuteDataStream(ctx, pgDs, sc); err != nil {
-					log.Printf("ExecuteDataStream error: %v", err)
-					cancel()
-				}
-			}()
-
 			writer := NewParquetDataWriter(pgDs, &buf)
 
-			rg.Add(1)
-			go func() {
-				defer rg.Done()
-				pgDs.BatchesToWriter(ctx, writer)
-			}()
-			rg.Wait()
-			writer.Close()
+			err := core.Execute(ctx, 1, sc, pgDs, pgr, writer)
+			assert.NoError(t, err)
 
 			// going to have to come back to this
 		})
@@ -369,8 +393,9 @@ func TestParquetWriter(t *testing.T) {
 	rg := sync.WaitGroup{}
 	rg.Add(1)
 	go func() {
+		bw := pdw.CreateBatchWriter()
 		defer rg.Done()
-		ds.BatchesToWriter(ctx, pdw)
+		ds.BatchesToWriter(ctx, bw)
 	}()
 	rg.Wait()
 

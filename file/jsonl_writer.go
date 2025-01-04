@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -14,9 +15,48 @@ import (
 type JSONLWriter struct {
 	datastream *data.DataStream
 	writer     io.Writer
+	mux        *sync.Mutex
 }
 
-func (w *JSONLWriter) WriteRow(row []any) error {
+type JSONLBatchWriter struct {
+	dataWriter *JSONLWriter
+	buffer     [][]byte
+}
+
+func NewJSONLWriter(ds *data.DataStream, writer io.Writer) *JSONLWriter {
+	return &JSONLWriter{datastream: ds, writer: writer, mux: &sync.Mutex{}}
+}
+
+func (w *JSONLWriter) CreateBatchWriter() data.BatchWriter {
+	buffer := make([][]byte, 0, w.datastream.BatchSize)
+	return &JSONLBatchWriter{dataWriter: w, buffer: buffer}
+}
+
+func (bw *JSONLBatchWriter) WriteBatch(batch data.Batch) error {
+	for _, row := range batch.Rows {
+		jsonLine, err := bw.dataWriter.ProcessRow(row)
+		if err != nil {
+			return err
+		}
+		bw.buffer = append(bw.buffer, jsonLine)
+	}
+
+	bw.dataWriter.mux.Lock()
+	defer bw.dataWriter.mux.Unlock()
+	for _, line := range bw.buffer {
+		line = append(line, '\n')
+		if _, err := bw.dataWriter.writer.Write(line); err != nil {
+			return err
+		}
+	}
+
+	bw.dataWriter.Flush()
+	bw.buffer = bw.buffer[:0]
+
+	return nil
+}
+
+func (w *JSONLWriter) ProcessRow(row []any) ([]byte, error) {
 	// Create a map of column names to values
 	jsonObject := make(map[string]any, len(w.datastream.DestColumns))
 	for i, col := range w.datastream.DestColumns {
@@ -32,13 +72,13 @@ func (w *JSONLWriter) WriteRow(row []any) error {
 			case [16]uint8:
 				uuidValue, err := uuid.FromBytes(v[:])
 				if err != nil {
-					return err
+					return nil, err
 				}
 				jsonObject[col.Name] = uuidValue.String()
 			case []uint8:
 				uuidValue, err := uuid.FromBytes(v[:])
 				if err != nil {
-					return err
+					return nil, err
 				}
 				jsonObject[col.Name] = uuidValue.String()
 			default:
@@ -58,7 +98,7 @@ func (w *JSONLWriter) WriteRow(row []any) error {
 			case string:
 				var u interface{}
 				if err := json.Unmarshal([]byte(v), &u); err != nil {
-					return fmt.Errorf("failed to unmarshal JSON: %v", err)
+					return nil, fmt.Errorf("failed to unmarshal JSON: %v", err)
 				}
 				jsonObject[col.Name] = u
 			default:
@@ -72,11 +112,10 @@ func (w *JSONLWriter) WriteRow(row []any) error {
 	// Marshal the map to JSON
 	line, err := json.Marshal(jsonObject)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	line = append(line, '\n')
-	_, err = w.writer.Write(line)
-	return err
+
+	return line, err
 }
 
 func (w *JSONLWriter) Flush() error {

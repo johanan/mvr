@@ -25,12 +25,15 @@ import (
 var epochDate = time.Date(1970, 1, 1, 0, 0, 0, 0, time.UTC)
 
 type ParquetDataWriter struct {
-	datastream       *data.DataStream
-	writer           *file.Writer
+	datastream *data.DataStream
+	writer     *file.Writer
+	mux        sync.Mutex
+}
+
+type ParquetBatchWriter struct {
+	dataWriter       *ParquetDataWriter
 	columnBuffers    []interface{}
 	definitionLevels [][]int16
-	rowCount         int
-	mux              sync.Mutex
 }
 
 type ParquetDecimal struct {
@@ -96,16 +99,6 @@ func checkType(col data.Column) MappedType {
 
 func NewParquetDataWriter(datastream *data.DataStream, ioWriter io.Writer) *ParquetDataWriter {
 	columnCount := len(datastream.DestColumns)
-	maxRows := 100
-
-	columnBuffers := make([]interface{}, columnCount)
-	definitionLevels := make([][]int16, columnCount)
-
-	for i := 0; i < columnCount; i++ {
-		mapped := checkType(datastream.DestColumns[i])
-		columnBuffers[i] = reflect.MakeSlice(reflect.SliceOf(mapped.GoType), 0, maxRows).Interface()
-		definitionLevels[i] = make([]int16, maxRows)
-	}
 
 	nodes := make([]schema.Node, columnCount)
 
@@ -123,184 +116,200 @@ func NewParquetDataWriter(datastream *data.DataStream, ioWriter io.Writer) *Parq
 	fileProp := file.WithWriterProps(prop)
 	writer := file.NewParquetWriter(ioWriter, s.Root(), fileProp)
 
-	return &ParquetDataWriter{datastream: datastream, writer: writer, columnBuffers: columnBuffers, definitionLevels: definitionLevels, rowCount: 0}
+	return &ParquetDataWriter{datastream: datastream, writer: writer}
 }
 
-func (pw *ParquetDataWriter) WriteRow(row []any) error {
-	pw.mux.Lock()
-	defer pw.mux.Unlock()
-	for i, col := range pw.datastream.DestColumns {
-		if row[i] == nil {
-			pw.definitionLevels[i][pw.rowCount] = 0
-			continue
-		}
-		// has value so set definition level to 1
-		pw.definitionLevels[i][pw.rowCount] = 1
+func (pw *ParquetDataWriter) CreateBatchWriter() data.BatchWriter {
+	// allocate column buffers and definition levels
+	columnCount := len(pw.datastream.DestColumns)
+	columnBuffers := make([]interface{}, columnCount)
+	definitionLevels := make([][]int16, columnCount)
 
-		switch col.DatabaseType {
-		case "INT2":
-			buf, ok := pw.columnBuffers[i].([]int32)
-			if !ok {
-				return fmt.Errorf("type assertion failed for INT2")
-			}
-			pw.columnBuffers[i] = append(buf, cast.ToInt32(row[i]))
-		case "INT4":
-			buf, ok := pw.columnBuffers[i].([]int32)
-			if !ok {
-				return fmt.Errorf("type assertion failed for INT4")
-			}
-			pw.columnBuffers[i] = append(buf, cast.ToInt32(row[i]))
-		case "INT8":
-			buf, ok := pw.columnBuffers[i].([]int64)
-			if !ok {
-				return fmt.Errorf("type assertion failed for INT8")
-			}
-			pw.columnBuffers[i] = append(buf, cast.ToInt64(row[i]))
-		case "FLOAT4":
-			buf, ok := pw.columnBuffers[i].([]float32)
-			if !ok {
-				return fmt.Errorf("type assertion failed for FLOAT4")
-			}
-			pw.columnBuffers[i] = append(buf, cast.ToFloat32(row[i]))
-		case "FLOAT8":
-			buf, ok := pw.columnBuffers[i].([]float64)
-			if !ok {
-				return fmt.Errorf("type assertion failed for FLOAT8")
-			}
-			pw.columnBuffers[i] = append(buf, cast.ToFloat64(row[i]))
-		case "JSONB", "JSON", "_TEXT":
-			buf, ok := pw.columnBuffers[i].([]string)
-			if !ok {
-				return fmt.Errorf("type assertion failed for JSON types")
-			}
-			j, err := json.Marshal(row[i])
-			if err != nil {
-				return fmt.Errorf("failed to marshal JSON for column %s: %v", col.Name, err)
-			}
-			pw.columnBuffers[i] = append(buf, string(j))
-		case "UUID":
-			buf, ok := pw.columnBuffers[i].([][]byte)
-			if !ok {
-				return fmt.Errorf("type assertion failed for UUID")
-			}
+	for i := 0; i < columnCount; i++ {
+		mapped := checkType(pw.datastream.DestColumns[i])
+		columnBuffers[i] = reflect.MakeSlice(reflect.SliceOf(mapped.GoType), 0, pw.datastream.BatchSize).Interface()
+		definitionLevels[i] = make([]int16, 0, pw.datastream.BatchSize)
+	}
 
-			switch v := row[i].(type) {
-			case string:
-				uuidValue, err := uuid.Parse(v)
+	return &ParquetBatchWriter{dataWriter: pw, columnBuffers: columnBuffers, definitionLevels: definitionLevels}
+}
+
+func (pb *ParquetBatchWriter) WriteBatch(batch data.Batch) error {
+	for _, row := range batch.Rows {
+		for i, col := range pb.dataWriter.datastream.DestColumns {
+			if row[i] == nil {
+				pb.definitionLevels[i] = append(pb.definitionLevels[i], 0)
+				continue
+			}
+			// has value so set definition level to 1
+			pb.definitionLevels[i] = append(pb.definitionLevels[i], 1)
+
+			switch col.DatabaseType {
+			case "INT2":
+				buf, ok := pb.columnBuffers[i].([]int32)
+				if !ok {
+					return fmt.Errorf("type assertion failed for INT2")
+				}
+				pb.columnBuffers[i] = append(buf, cast.ToInt32(row[i]))
+			case "INT4":
+				buf, ok := pb.columnBuffers[i].([]int32)
+				if !ok {
+					return fmt.Errorf("type assertion failed for INT4")
+				}
+				pb.columnBuffers[i] = append(buf, cast.ToInt32(row[i]))
+			case "INT8":
+				buf, ok := pb.columnBuffers[i].([]int64)
+				if !ok {
+					return fmt.Errorf("type assertion failed for INT8")
+				}
+				pb.columnBuffers[i] = append(buf, cast.ToInt64(row[i]))
+			case "FLOAT4":
+				buf, ok := pb.columnBuffers[i].([]float32)
+				if !ok {
+					return fmt.Errorf("type assertion failed for FLOAT4")
+				}
+				pb.columnBuffers[i] = append(buf, cast.ToFloat32(row[i]))
+			case "FLOAT8":
+				buf, ok := pb.columnBuffers[i].([]float64)
+				if !ok {
+					return fmt.Errorf("type assertion failed for FLOAT8")
+				}
+				pb.columnBuffers[i] = append(buf, cast.ToFloat64(row[i]))
+			case "JSONB", "JSON", "_TEXT":
+				buf, ok := pb.columnBuffers[i].([]string)
+				if !ok {
+					return fmt.Errorf("type assertion failed for JSON types")
+				}
+				j, err := json.Marshal(row[i])
 				if err != nil {
-					return fmt.Errorf("failed to parse UUID for column %s: %v", col.Name, err)
+					return fmt.Errorf("failed to marshal JSON for column %s: %v", col.Name, err)
 				}
-				pw.columnBuffers[i] = append(buf, uuidValue[:])
-			case [16]uint8:
-				pw.columnBuffers[i] = append(buf, v[:])
-			case uuid.UUID:
-				pw.columnBuffers[i] = append(buf, v[:])
-			default:
-				return fmt.Errorf("expected string or UUID for UUID column %s, got %T", col.Name, v)
-			}
-		case "NUMERIC":
-			decimalValue, err := convertToParquetDecimal(row[i], int(col.Precision), int(col.Scale))
-			if err != nil {
-				return fmt.Errorf("failed to convert DECIMAL for column %s: %v", col.Name, err)
-			}
-			switch decimalValue.Type {
-			case Int32Decimal:
-				buf, ok := pw.columnBuffers[i].([]int32)
+				pb.columnBuffers[i] = append(buf, string(j))
+			case "UUID":
+				buf, ok := pb.columnBuffers[i].([][]byte)
 				if !ok {
-					return fmt.Errorf("type assertion failed for DECIMAL")
+					return fmt.Errorf("type assertion failed for UUID")
 				}
-				pw.columnBuffers[i] = append(buf, decimalValue.Int32Val)
-			case Int64Decimal:
-				buf, ok := pw.columnBuffers[i].([]int64)
+
+				switch v := row[i].(type) {
+				case string:
+					uuidValue, err := uuid.Parse(v)
+					if err != nil {
+						return fmt.Errorf("failed to parse UUID for column %s: %v", col.Name, err)
+					}
+					pb.columnBuffers[i] = append(buf, uuidValue[:])
+				case [16]uint8:
+					pb.columnBuffers[i] = append(buf, v[:])
+				case uuid.UUID:
+					pb.columnBuffers[i] = append(buf, v[:])
+				default:
+					return fmt.Errorf("expected string or UUID for UUID column %s, got %T", col.Name, v)
+				}
+			case "NUMERIC":
+				pb.dataWriter.mux.Lock()
+				decimalValue, err := convertToParquetDecimal(row[i], int(col.Precision), int(col.Scale))
+				pb.dataWriter.mux.Unlock()
+				if err != nil {
+					return fmt.Errorf("failed to convert DECIMAL for column %s: %v", col.Name, err)
+				}
+				switch decimalValue.Type {
+				case Int32Decimal:
+					buf, ok := pb.columnBuffers[i].([]int32)
+					if !ok {
+						return fmt.Errorf("type assertion failed for DECIMAL")
+					}
+					pb.columnBuffers[i] = append(buf, decimalValue.Int32Val)
+				case Int64Decimal:
+					buf, ok := pb.columnBuffers[i].([]int64)
+					if !ok {
+						return fmt.Errorf("type assertion failed for DECIMAL")
+					}
+					pb.columnBuffers[i] = append(buf, decimalValue.Int64Val)
+				case ByteArrayDecimal:
+					buf, ok := pb.columnBuffers[i].([][]byte)
+					if !ok {
+						return fmt.Errorf("type assertion failed for DECIMAL")
+					}
+					pb.columnBuffers[i] = append(buf, decimalValue.ByteArrayVal)
+				default:
+					return fmt.Errorf("unknown DECIMAL type %v", decimalValue.Type)
+				}
+			case "DATE":
+				buf, ok := pb.columnBuffers[i].([]int32)
 				if !ok {
-					return fmt.Errorf("type assertion failed for DECIMAL")
+					return fmt.Errorf("type assertion failed for DATE")
 				}
-				pw.columnBuffers[i] = append(buf, decimalValue.Int64Val)
-			case ByteArrayDecimal:
-				buf, ok := pw.columnBuffers[i].([][]byte)
+				dateValue, ok := row[i].(time.Time)
 				if !ok {
-					return fmt.Errorf("type assertion failed for DECIMAL")
+					return fmt.Errorf("expected time.Time for DATE column %s, got %T", col.Name, row[i])
 				}
-				pw.columnBuffers[i] = append(buf, decimalValue.ByteArrayVal)
+				// Convert the date to the number of days since the Unix epoch
+				daysSinceEpoch := int32(dateValue.Sub(epochDate).Truncate(24*time.Hour).Hours() / 24)
+				pb.columnBuffers[i] = append(buf, daysSinceEpoch)
+			case "BOOL":
+				buf, ok := pb.columnBuffers[i].([]bool)
+				if !ok {
+					return fmt.Errorf("type assertion failed for BOOL")
+				}
+				switch v := row[i].(type) {
+				case bool:
+					pb.columnBuffers[i] = append(buf, v)
+				default:
+					return fmt.Errorf("expected bool for BOOL column %s, got %T", col.Name, row[i])
+				}
+			case "TIMESTAMP", "TIMESTAMPTZ":
+				buf, ok := pb.columnBuffers[i].([]int64)
+				if !ok {
+					return fmt.Errorf("type assertion failed for TIMESTAMP")
+				}
+				v, ok := row[i].(time.Time)
+				if !ok {
+					return fmt.Errorf("expected time.Time for TIMESTAMP column %s, got %T", col.Name, row[i])
+				}
+				pb.columnBuffers[i] = append(buf, v.UnixNano())
 			default:
-				return fmt.Errorf("unknown DECIMAL type %v", decimalValue.Type)
+				// cast everything else to string
+				buf, ok := pb.columnBuffers[i].([]string)
+				if !ok {
+					return fmt.Errorf("type assertion failed for default")
+				}
+				pb.columnBuffers[i] = append(buf, cast.ToString(row[i]))
 			}
-		case "DATE":
-			buf, ok := pw.columnBuffers[i].([]int32)
-			if !ok {
-				return fmt.Errorf("type assertion failed for DATE")
-			}
-			dateValue, ok := row[i].(time.Time)
-			if !ok {
-				return fmt.Errorf("expected time.Time for DATE column %s, got %T", col.Name, row[i])
-			}
-			// Convert the date to the number of days since the Unix epoch
-			daysSinceEpoch := int32(dateValue.Sub(epochDate).Truncate(24*time.Hour).Hours() / 24)
-			pw.columnBuffers[i] = append(buf, daysSinceEpoch)
-		case "BOOL":
-			buf, ok := pw.columnBuffers[i].([]bool)
-			if !ok {
-				return fmt.Errorf("type assertion failed for BOOL")
-			}
-			switch v := row[i].(type) {
-			case bool:
-				pw.columnBuffers[i] = append(buf, v)
-			default:
-				return fmt.Errorf("expected bool for BOOL column %s, got %T", col.Name, row[i])
-			}
-		case "TIMESTAMP", "TIMESTAMPTZ":
-			buf, ok := pw.columnBuffers[i].([]int64)
-			if !ok {
-				return fmt.Errorf("type assertion failed for TIMESTAMP")
-			}
-			v, ok := row[i].(time.Time)
-			if !ok {
-				return fmt.Errorf("expected time.Time for TIMESTAMP column %s, got %T", col.Name, row[i])
-			}
-			pw.columnBuffers[i] = append(buf, v.UnixNano())
-		default:
-			// cast everything else to string
-			buf, ok := pw.columnBuffers[i].([]string)
-			if !ok {
-				return fmt.Errorf("type assertion failed for default")
-			}
-			pw.columnBuffers[i] = append(buf, cast.ToString(row[i]))
 		}
 	}
 
-	pw.rowCount++
+	pb.dataWriter.mux.Lock()
+	defer pb.dataWriter.mux.Unlock()
+	err := pb.dataWriter.writeRowGroup(pb.columnBuffers, pb.definitionLevels, len(batch.Rows))
+	if err != nil {
+		return err
+	}
 
-	if pw.rowCount >= 100 {
-		err := pw.writeBatch()
-		if err != nil {
-			return err
+	// reset buffers
+	for i := range pb.columnBuffers {
+		switch pb.columnBuffers[i].(type) {
+		case []int32:
+			pb.columnBuffers[i] = pb.columnBuffers[i].([]int32)[:0]
+		case []int64:
+			pb.columnBuffers[i] = pb.columnBuffers[i].([]int64)[:0]
+		case []float32:
+			pb.columnBuffers[i] = pb.columnBuffers[i].([]float32)[:0]
+		case []float64:
+			pb.columnBuffers[i] = pb.columnBuffers[i].([]float64)[:0]
+		case []string:
+			pb.columnBuffers[i] = pb.columnBuffers[i].([]string)[:0]
+		case [][]byte:
+			pb.columnBuffers[i] = pb.columnBuffers[i].([][]byte)[:0]
+		case []bool:
+			pb.columnBuffers[i] = pb.columnBuffers[i].([]bool)[:0]
 		}
-		// Reset the row count and clear the buffers
-		pw.rowCount = 0
-		for i := range pw.datastream.DestColumns {
-			mapped := checkType(pw.datastream.DestColumns[i])
-			pw.columnBuffers[i] = reflect.MakeSlice(reflect.SliceOf(mapped.GoType), 0, 100).Interface()
-			pw.definitionLevels[i] = make([]int16, 100)
-		}
+		pb.definitionLevels[i] = pb.definitionLevels[i][:0]
 	}
 
 	return nil
 }
 
 func (pw *ParquetDataWriter) Flush() error {
-	if pw.rowCount > 0 {
-		pw.mux.Lock()
-		err := pw.writeBatch()
-		if err != nil {
-			return err
-		}
-		pw.rowCount = 0
-		for i := range pw.datastream.DestColumns {
-			mapped := checkType(pw.datastream.DestColumns[i])
-			pw.columnBuffers[i] = reflect.MakeSlice(reflect.SliceOf(mapped.GoType), 0, 100).Interface()
-			pw.definitionLevels[i] = make([]int16, 100)
-		}
-	}
 	return nil
 }
 
@@ -309,7 +318,7 @@ func (pw *ParquetDataWriter) Close() error {
 	return pw.writer.Close()
 }
 
-func (pw *ParquetDataWriter) writeBatch() error {
+func (pw *ParquetDataWriter) writeRowGroup(columnBuffers []any, definitionLevels [][]int16, rowCount int) error {
 	rg := pw.writer.AppendBufferedRowGroup()
 	defer rg.Close()
 	for i := range pw.datastream.DestColumns {
@@ -320,43 +329,43 @@ func (pw *ParquetDataWriter) writeBatch() error {
 
 		switch chunker := rgCol.(type) {
 		case *file.Int32ColumnChunkWriter:
-			buf, ok := pw.columnBuffers[i].([]int32)
+			buf, ok := columnBuffers[i].([]int32)
 			if !ok {
 				return fmt.Errorf("type assertion failed for INT4")
 			}
-			_, err := chunker.WriteBatch(buf, pw.definitionLevels[i][:pw.rowCount], nil)
+			_, err := chunker.WriteBatch(buf, definitionLevels[i][:rowCount], nil)
 			if err != nil {
 				return err
 			}
 		case *file.Int64ColumnChunkWriter:
-			buf, ok := pw.columnBuffers[i].([]int64)
+			buf, ok := columnBuffers[i].([]int64)
 			if !ok {
 				return fmt.Errorf("type assertion failed for INT8 writer")
 			}
-			_, err := chunker.WriteBatch(buf, pw.definitionLevels[i][:pw.rowCount], nil)
+			_, err := chunker.WriteBatch(buf, definitionLevels[i][:rowCount], nil)
 			if err != nil {
 				return err
 			}
 		case *file.Float32ColumnChunkWriter:
-			buf, ok := pw.columnBuffers[i].([]float32)
+			buf, ok := columnBuffers[i].([]float32)
 			if !ok {
 				return fmt.Errorf("type assertion failed for FLOAT4")
 			}
-			_, err := chunker.WriteBatch(buf, pw.definitionLevels[i][:pw.rowCount], nil)
+			_, err := chunker.WriteBatch(buf, definitionLevels[i][:rowCount], nil)
 			if err != nil {
 				return err
 			}
 		case *file.Float64ColumnChunkWriter:
-			buf, ok := pw.columnBuffers[i].([]float64)
+			buf, ok := columnBuffers[i].([]float64)
 			if !ok {
 				return fmt.Errorf("type assertion failed for FLOAT8")
 			}
-			_, err := chunker.WriteBatch(buf, pw.definitionLevels[i][:pw.rowCount], nil)
+			_, err := chunker.WriteBatch(buf, definitionLevels[i][:rowCount], nil)
 			if err != nil {
 				return err
 			}
 		case *file.ByteArrayColumnChunkWriter:
-			buf, ok := pw.columnBuffers[i].([]string)
+			buf, ok := columnBuffers[i].([]string)
 			if !ok {
 				return fmt.Errorf("type assertion failed for BYTE_ARRAY")
 			}
@@ -364,12 +373,12 @@ func (pw *ParquetDataWriter) writeBatch() error {
 			for j := 0; j < len(buf); j++ {
 				byteArray[j] = parquet.ByteArray(buf[j])
 			}
-			_, err := chunker.WriteBatch(byteArray, pw.definitionLevels[i][:pw.rowCount], nil)
+			_, err := chunker.WriteBatch(byteArray, definitionLevels[i][:rowCount], nil)
 			if err != nil {
 				return err
 			}
 		case *file.FixedLenByteArrayColumnChunkWriter:
-			buf, ok := pw.columnBuffers[i].([][]byte)
+			buf, ok := columnBuffers[i].([][]byte)
 			if !ok {
 				return fmt.Errorf("type assertion failed for FIXED_LEN_BYTE_ARRAY")
 			}
@@ -378,16 +387,16 @@ func (pw *ParquetDataWriter) writeBatch() error {
 			for j := 0; j < len(buf); j++ {
 				fixedLenByteArray[j] = parquet.FixedLenByteArray(buf[j])
 			}
-			_, err := chunker.WriteBatch(fixedLenByteArray, pw.definitionLevels[i][:pw.rowCount], nil)
+			_, err := chunker.WriteBatch(fixedLenByteArray, definitionLevels[i][:rowCount], nil)
 			if err != nil {
 				return err
 			}
 		case *file.BooleanColumnChunkWriter:
-			buf, ok := pw.columnBuffers[i].([]bool)
+			buf, ok := columnBuffers[i].([]bool)
 			if !ok {
 				return fmt.Errorf("type assertion failed for BOOLEAN")
 			}
-			_, err := chunker.WriteBatch(buf, pw.definitionLevels[i][:pw.rowCount], nil)
+			_, err := chunker.WriteBatch(buf, definitionLevels[i][:rowCount], nil)
 			if err != nil {
 				return err
 			}
@@ -405,6 +414,21 @@ func convertToParquetDecimal(value any, precision, scale int) (ParquetDecimal, e
 		// I tried big float but it was not working
 		float := v.StringFixed(int32(scale))
 		return convertToParquetDecimal(float, precision, scale)
+
+	case *big.Int:
+		switch {
+		case precision <= 9:
+			return ParquetDecimal{Type: Int32Decimal, Int32Val: int32(v.Int64())}, nil
+		case precision <= 18:
+			return ParquetDecimal{Type: Int64Decimal, Int64Val: v.Int64()}, nil
+		default:
+			byteArray, err := bigIntToFixedBytes(v, precision)
+			if err != nil {
+				return result, err
+			}
+			return ParquetDecimal{Type: ByteArrayDecimal, ByteArrayVal: byteArray}, nil
+		}
+
 	case *big.Float:
 		// Convert *big.Float to unscaled int
 		unscaledInt := convertBigFloatToUnscaledInt(v, scale)

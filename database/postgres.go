@@ -80,7 +80,7 @@ func (pool *PGDataReader) CreateDataStream(ctx context.Context, connUrl *url.URL
 		destColumns = data.OverrideColumns(destColumns, config.Columns)
 	}
 
-	batchChan := make(chan Batch, 10)
+	batchChan := make(chan Batch, config.GetBatchCount())
 	logColumns(columns, destColumns)
 	return &DataStream{TotalRows: 0, BatchChan: batchChan, BatchSize: config.GetBatchSize(), Columns: columns, DestColumns: destColumns}, nil
 
@@ -96,6 +96,10 @@ func (pool *PGDataReader) ExecuteDataStream(ctx context.Context, ds *DataStream,
 	defer rows.Close()
 
 	batch := Batch{Rows: make([][]any, 0, ds.BatchSize)}
+	defer func() {
+		close(ds.BatchChan)
+		log.Debug().Msg("Closed batch channel")
+	}()
 
 	for rows.Next() {
 		row := make([]any, len(ds.Columns))
@@ -131,8 +135,6 @@ func (pool *PGDataReader) ExecuteDataStream(ctx context.Context, ds *DataStream,
 	}
 
 	log.Debug().Msg("Finished reading rows")
-	close(ds.BatchChan)
-	log.Debug().Msg("Closed batch channel")
 
 	return nil
 }

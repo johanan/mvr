@@ -69,7 +69,7 @@ func (sf *SnowflakeDataReader) CreateDataStream(ctx context.Context, connUrl *ur
 		destColumns = data.OverrideColumns(destColumns, config.Columns)
 	}
 
-	batchChan := make(chan Batch, 10)
+	batchChan := make(chan Batch, config.GetBatchCount())
 	logColumns(columns, destColumns)
 	return &DataStream{TotalRows: 0, BatchChan: batchChan, BatchSize: config.GetBatchSize(), Columns: columns, DestColumns: destColumns}, nil
 }
@@ -89,6 +89,10 @@ func (sf *SnowflakeDataReader) ExecuteDataStream(ctx context.Context, ds *DataSt
 		log.Fatal().Msgf("Failed to execute query: %v", err)
 	}
 	defer result.Close()
+	defer func() {
+		close(ds.BatchChan)
+		log.Debug().Msg("Closed batch channel")
+	}()
 
 	batch := Batch{Rows: make([][]any, 0, ds.BatchSize)}
 
@@ -126,9 +130,6 @@ func (sf *SnowflakeDataReader) ExecuteDataStream(ctx context.Context, ds *DataSt
 	}
 
 	log.Debug().Msg("Finished reading rows")
-	close(ds.BatchChan)
-	log.Debug().Msg("Closed batch channel")
-
 	return nil
 }
 
