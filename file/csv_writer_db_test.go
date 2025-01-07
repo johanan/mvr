@@ -49,7 +49,8 @@ format: csv`,
 John Doe,2024-10-08T17:22:00,2024-10-08T17:22:00Z,a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11,NULL,true
 Test Tester,2024-10-08T17:22:00,2024-10-08T17:22:00Z,a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a12,NULL,false
 `,
-		}, {
+		},
+		{
 			name: "Numbers Limit Test",
 			yaml: `stream_name: public.numbers
 format: csv
@@ -60,6 +61,17 @@ params:
     type: INT8`,
 			expected: `smallint_value,integer_value,bigint_value,decimal_value,double_value,float_value
 1,1,1,1.000000000000000,1,1
+`,
+		},
+		{
+			name: "Users With Date Test",
+			yaml: `stream_name: public.users
+format: csv
+sql: SELECT * FROM public.users WHERE createdz > $1
+params:
+  P1:
+    value: "2024-10-08 17:22:0000+0000"`,
+			expected: `name,created,createdz,unique_id,nullable_id,active
 `,
 		},
 	}

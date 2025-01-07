@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 
+	"github.com/rs/zerolog"
 	"github.com/spf13/cobra"
 )
 
@@ -27,5 +28,7 @@ func init() {
 
 func Execute(ctx context.Context) error {
 	rootCmd.SetContext(ctx)
+	// set default log level to info
+	zerolog.SetGlobalLevel(zerolog.InfoLevel)
 	return rootCmd.Execute()
 }

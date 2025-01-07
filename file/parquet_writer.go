@@ -34,6 +34,7 @@ type ParquetBatchWriter struct {
 	dataWriter       *ParquetDataWriter
 	columnBuffers    []interface{}
 	definitionLevels [][]int16
+	scaleFactors     map[int]*big.Float
 }
 
 type ParquetDecimal struct {
@@ -131,7 +132,9 @@ func (pw *ParquetDataWriter) CreateBatchWriter() data.BatchWriter {
 		definitionLevels[i] = make([]int16, 0, pw.datastream.BatchSize)
 	}
 
-	return &ParquetBatchWriter{dataWriter: pw, columnBuffers: columnBuffers, definitionLevels: definitionLevels}
+	scaleFactors := make(map[int]*big.Float)
+
+	return &ParquetBatchWriter{dataWriter: pw, columnBuffers: columnBuffers, definitionLevels: definitionLevels, scaleFactors: scaleFactors}
 }
 
 func (pb *ParquetBatchWriter) WriteBatch(batch data.Batch) error {
@@ -206,9 +209,7 @@ func (pb *ParquetBatchWriter) WriteBatch(batch data.Batch) error {
 					return fmt.Errorf("expected string or UUID for UUID column %s, got %T", col.Name, v)
 				}
 			case "NUMERIC":
-				pb.dataWriter.mux.Lock()
-				decimalValue, err := convertToParquetDecimal(row[i], int(col.Precision), int(col.Scale))
-				pb.dataWriter.mux.Unlock()
+				decimalValue, err := convertToParquetDecimal(row[i], int(col.Precision), int(col.Scale), pb.scaleFactors)
 				if err != nil {
 					return fmt.Errorf("failed to convert DECIMAL for column %s: %v", col.Name, err)
 				}
@@ -279,8 +280,8 @@ func (pb *ParquetBatchWriter) WriteBatch(batch data.Batch) error {
 	}
 
 	pb.dataWriter.mux.Lock()
-	defer pb.dataWriter.mux.Unlock()
 	err := pb.dataWriter.writeRowGroup(pb.columnBuffers, pb.definitionLevels, len(batch.Rows))
+	pb.dataWriter.mux.Unlock()
 	if err != nil {
 		return err
 	}
@@ -407,13 +408,13 @@ func (pw *ParquetDataWriter) writeRowGroup(columnBuffers []any, definitionLevels
 	return nil
 }
 
-func convertToParquetDecimal(value any, precision, scale int) (ParquetDecimal, error) {
+func convertToParquetDecimal(value any, precision, scale int, scaleFactors map[int]*big.Float) (ParquetDecimal, error) {
 	var result ParquetDecimal
 	switch v := value.(type) {
 	case decimal.Decimal:
 		// I tried big float but it was not working
 		float := v.StringFixed(int32(scale))
-		return convertToParquetDecimal(float, precision, scale)
+		return convertToParquetDecimal(float, precision, scale, scaleFactors)
 
 	case *big.Int:
 		switch {
@@ -431,7 +432,7 @@ func convertToParquetDecimal(value any, precision, scale int) (ParquetDecimal, e
 
 	case *big.Float:
 		// Convert *big.Float to unscaled int
-		unscaledInt := convertBigFloatToUnscaledInt(v, scale)
+		unscaledInt := convertBigFloatToUnscaledInt(v, scale, scaleFactors)
 		switch {
 		case precision <= 9:
 			if !unscaledInt.IsInt64() {
@@ -465,7 +466,7 @@ func convertToParquetDecimal(value any, precision, scale int) (ParquetDecimal, e
 		} else {
 			// For higher precision, use *big.Float
 			bigFloat := big.NewFloat(v)
-			unscaledInt := convertBigFloatToUnscaledInt(bigFloat, scale)
+			unscaledInt := convertBigFloatToUnscaledInt(bigFloat, scale, scaleFactors)
 			byteArray, err := bigIntToFixedBytes(unscaledInt, precision)
 			if err != nil {
 				return result, err
@@ -572,9 +573,7 @@ func convertDecimalStringToUnscaledInt(decimalStr string, scale int) (*big.Int, 
 	return unscaledValue, nil
 }
 
-var scaleFactors = make(map[int]*big.Float)
-
-func fastPowerOfTen(scale int) *big.Float {
+func fastPowerOfTen(scale int, scaleFactors map[int]*big.Float) *big.Float {
 	if factor, exists := scaleFactors[scale]; exists {
 		return factor
 	}
@@ -595,9 +594,9 @@ func fastPowerOfTen(scale int) *big.Float {
 }
 
 // ConvertBigFloatToUnscaledInt converts a big.Float to a big.Int by applying the scale
-func convertBigFloatToUnscaledInt(value *big.Float, scale int) *big.Int {
+func convertBigFloatToUnscaledInt(value *big.Float, scale int, scaleFactors map[int]*big.Float) *big.Int {
 	// Get the scaling factor efficiently
-	scalingFactor := fastPowerOfTen(scale)
+	scalingFactor := fastPowerOfTen(scale, scaleFactors)
 
 	// Multiply the big.Float value by the scaling factor
 	scaledValue := new(big.Float).Mul(value, scalingFactor)

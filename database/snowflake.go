@@ -31,6 +31,22 @@ func NewSnowflakeDataReader(connUrl *url.URL) (*SnowflakeDataReader, error) {
 		return nil, err
 	}
 
+	warehouse := getKeyCaseInsensitive(connUrl.Query(), "warehouse")
+	if warehouse != "" {
+		_, err = db.Exec("USE WAREHOUSE " + warehouse)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	role := getKeyCaseInsensitive(connUrl.Query(), "role")
+	if role != "" {
+		_, err = db.Exec("USE ROLE " + role)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	return &SnowflakeDataReader{Snowflake: db}, nil
 }
 
@@ -44,6 +60,7 @@ func (sf *SnowflakeDataReader) CreateDataStream(ctx context.Context, connUrl *ur
 
 	// let's get the columns
 	col_query := "SELECT * FROM (" + config.SQL + ") LIMIT 0 OFFSET 0"
+	log.Debug().Str("sql", col_query).Msg("Getting columns")
 
 	stmt, err := db.PrepareContext(ctx, col_query)
 	if err != nil {

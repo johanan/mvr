@@ -3,6 +3,8 @@ package database
 import (
 	"database/sql"
 	"encoding/json"
+	"net/url"
+	"strings"
 
 	"github.com/johanan/mvr/data"
 	"github.com/rs/zerolog/log"
@@ -63,4 +65,13 @@ func BuildParams(config *data.StreamConfig) []interface{} {
 
 	}
 	return sqlParams
+}
+
+func getKeyCaseInsensitive(values url.Values, key string) string {
+	for k, v := range values {
+		if strings.EqualFold(k, key) {
+			return v[0]
+		}
+	}
+	return ""
 }

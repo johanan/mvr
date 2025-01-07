@@ -32,6 +32,7 @@ func (reader *MSDataReader) Close() error {
 
 func (reader *MSDataReader) CreateDataStream(ctx context.Context, connUrl *url.URL, config *data.StreamConfig) (*DataStream, error) {
 	col_query := "SELECT * FROM (" + config.SQL + ") as sub ORDER BY (SELECT NULL) OFFSET 0 ROWS FETCH NEXT 1 ROWS ONLY"
+	log.Debug().Str("sql", col_query).Msg("Getting columns")
 
 	paramValues := BuildParams(config)
 	sqlParams := make([]interface{}, 0, len(config.ParamKeys))

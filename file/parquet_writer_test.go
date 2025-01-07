@@ -89,9 +89,10 @@ func TestConversionToFixedBytes(t *testing.T) {
 			expected:  "0000000000000000000000000009c229",
 		},
 	}
+	scaleFactor := make(map[int]*big.Float)
 	for _, tt := range tests { // capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := convertToParquetDecimal(tt.value, tt.precision, tt.scale)
+			result, err := convertToParquetDecimal(tt.value, tt.precision, tt.scale, scaleFactor)
 			assert.NoError(t, err)
 			assert.Equal(t, tt.expected, hex.EncodeToString(result.ByteArrayVal))
 		})
