@@ -60,6 +60,7 @@ func (pool *PGDataReader) CreateDataStream(ctx context.Context, connUrl *url.URL
 
 	// let's get the columns
 	col_query := "SELECT * FROM (" + config.SQL + ") LIMIT 0 OFFSET 0"
+	log.Debug().Str("sql", col_query).Msg("Getting columns")
 
 	paramValues := BuildParams(config)
 	rows, err := db.QueryContext(ctx, col_query, paramValues...)

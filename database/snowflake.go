@@ -44,6 +44,7 @@ func (sf *SnowflakeDataReader) CreateDataStream(ctx context.Context, connUrl *ur
 
 	// let's get the columns
 	col_query := "SELECT * FROM (" + config.SQL + ") LIMIT 0 OFFSET 0"
+	log.Debug().Str("sql", col_query).Msg("Getting columns")
 
 	stmt, err := db.PrepareContext(ctx, col_query)
 	if err != nil {
@@ -142,7 +143,7 @@ func sfColumnsToPg(columns []Column) []Column {
 			pgCols[i].DatabaseType = "NUMERIC"
 			pgCols[i].Precision = col.Precision
 			pgCols[i].Scale = col.Scale
-		case "TIMESTAMP_NTZ":
+		case "TIMESTAMP_NTZ", "TIMESTAMP_LTZ":
 			pgCols[i].DatabaseType = "TIMESTAMP"
 
 		case "TIMESTAMP_TZ":

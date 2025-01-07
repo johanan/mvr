@@ -75,6 +75,7 @@ var mvCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("error validating config: %v", err)
 		}
+		log.Debug().Interface("config", sConfig).Msg("Config")
 
 		config, err := core.SetupConfig(sConfig)
 		if err != nil {
@@ -136,6 +137,8 @@ var mvCmd = &cobra.Command{
 		bar.Finish()
 		elapsed := time.Since(start)
 		log.Info().
+			Str("source", config.SourceConn.ParsedUrl.Host).
+			Str("sql", sConfig.SQL).
 			Str("path", path.String()).
 			Int("rows", datastream.TotalRows).
 			Dur("elapsed", elapsed).
