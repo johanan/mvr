@@ -31,22 +31,6 @@ func NewSnowflakeDataReader(connUrl *url.URL) (*SnowflakeDataReader, error) {
 		return nil, err
 	}
 
-	warehouse := getKeyCaseInsensitive(connUrl.Query(), "warehouse")
-	if warehouse != "" {
-		_, err = db.Exec("USE WAREHOUSE " + warehouse)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	role := getKeyCaseInsensitive(connUrl.Query(), "role")
-	if role != "" {
-		_, err = db.Exec("USE ROLE " + role)
-		if err != nil {
-			return nil, err
-		}
-	}
-
 	return &SnowflakeDataReader{Snowflake: db}, nil
 }
 
@@ -159,7 +143,7 @@ func sfColumnsToPg(columns []Column) []Column {
 			pgCols[i].DatabaseType = "NUMERIC"
 			pgCols[i].Precision = col.Precision
 			pgCols[i].Scale = col.Scale
-		case "TIMESTAMP_NTZ":
+		case "TIMESTAMP_NTZ", "TIMESTAMP_LTZ":
 			pgCols[i].DatabaseType = "TIMESTAMP"
 
 		case "TIMESTAMP_TZ":

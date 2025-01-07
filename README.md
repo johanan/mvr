@@ -4,8 +4,26 @@ Run the install script
 curl -sf https://raw.githubusercontent.com/johanan/mvr/refs/heads/main/mvr_install.sh | sh
 ```
 
+# Connection Strings
+Connection strings need to be passed by environment variables. No connection information should be in any config files or arguments. 
+
+`MVR_SOURCE` and `MVR_DEST` are the variables to set.
+
 # Abstract Database Types
 MVR abstracts to Postgres types. What this means is anytime a type is needed it should be expressed as a Postgres type. IE parameter types, overriding column types. 
+
+# Timestamps
+For the most part MVR will keep the timezone or the lack of a timezone into the output file. This means RFC3339 without timezone info for CSV and JSONL. And for parquet this is a logical type with `isAdjustedToUTC` set to true for timezone types and false for no timezone types.
+
+Postgres and MS SQL both have only two timestamp types which fits neatly into having a timezone or not. Snowflake has three types: `TIMESTAMP_NTZ`, `TIMESTAMP_TZ`, and `TIMESTAMP_LTZ`. The first two types do exactly what they say. NTZ stands for no timezone and TZ stands for timezone. These follow the above rules.
+
+`TIMESTAMP_LTZ` stands for local time zone. Why is this a timestamp type? *I am not sure*.🤷 What it means, though, is that the value of the timestamp depends on the timezone.
+
+How does MVR treat it? It is treated as a timestamp without a timezone. Because that is what it is. If the timezone changes then it works just like a timestamp without a timezone. Unfortunately Snowflake will convert it to a timestamp with the session timezone. To ensure you can get the value you need out of it, set the `timezone` parameter in the connection string to the timezone it needs to be in. 
+
+**HOLD ON** remember that it will come from Snowflake as having a timezone and if writing to parquet it will be converted to UTC. If you are -0400 then 4 hours will be added to the time in the parquet. If you need the *exact* timestamp in the column set the timezone to UTC, ie `snowflake://connection_info@account/db/schema?timezone=UTC`.
+
+See [Snowflake Connection Parameters](https://pkg.go.dev/github.com/snowflakedb/gosnowflake#hdr-Connection_Parameters)
 
 # Parameter Binding
 MVR gives you a lot flexibility to craft a query and bind parameters to it. 
@@ -55,7 +73,7 @@ params:
     type: BOOLEAN
 ```
 
-### MS SQL Server example
+### MS SQL Server
 ```yaml
 sql: |
   SELECT * FROM dbo.users WHERE user = @p1 AND active = @p2
