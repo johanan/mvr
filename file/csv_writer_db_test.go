@@ -67,10 +67,10 @@ params:
 			name: "Users With Date Test",
 			yaml: `stream_name: public.users
 format: csv
-sql: SELECT * FROM public.users WHERE createdz > $1
+sql: SELECT * FROM public.users WHERE createdz < $1
 params:
   P1:
-    value: "2024-10-08 17:22:0000+0000"`,
+    value: "2024-10-07 17:22:0000+0000"`,
 			expected: `name,created,createdz,unique_id,nullable_id,active
 `,
 		},

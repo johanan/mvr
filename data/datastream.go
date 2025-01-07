@@ -5,12 +5,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"html/template"
 	"net/url"
 	"os"
 	"slices"
 	"strings"
 	"sync"
+	"text/template"
 	"time"
 
 	"github.com/Masterminds/sprig/v3"
