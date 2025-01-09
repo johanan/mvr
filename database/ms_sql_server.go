@@ -52,6 +52,7 @@ func (reader *MSDataReader) CreateDataStream(ctx context.Context, connUrl *url.U
 
 	columns := MapToMvrColumns(dbCols)
 	destColumns := msColumnsToPg(columns)
+	srcColumns := msColumnsToPg(columns)
 
 	if len(config.Columns) > 0 {
 		destColumns = data.OverrideColumns(destColumns, config.Columns)
@@ -59,7 +60,7 @@ func (reader *MSDataReader) CreateDataStream(ctx context.Context, connUrl *url.U
 
 	batchChan := make(chan Batch, config.GetBatchCount())
 	logColumns(columns, destColumns)
-	return &DataStream{TotalRows: 0, BatchChan: batchChan, BatchSize: config.GetBatchSize(), Columns: columns, DestColumns: destColumns}, nil
+	return &DataStream{TotalRows: 0, BatchChan: batchChan, BatchSize: config.GetBatchSize(), Columns: srcColumns, DestColumns: destColumns}, nil
 }
 
 func (reader *MSDataReader) ExecuteDataStream(ctx context.Context, ds *DataStream, config *data.StreamConfig) error {
@@ -93,7 +94,7 @@ func (reader *MSDataReader) ExecuteDataStream(ctx context.Context, ds *DataStrea
 
 		// fix MS SQL Server wrong endianness for UUID
 		for i, col := range ds.DestColumns {
-			if !reader.KeepOriginalUUID && col.DatabaseType == "UUID" {
+			if !reader.KeepOriginalUUID && col.Type == "UUID" {
 				// null is fine, do not try to convert
 				if row[i] == nil {
 					continue
@@ -137,27 +138,32 @@ func msColumnsToPg(columns []Column) []Column {
 	pgCols := make([]Column, len(columns))
 	copy(pgCols, columns)
 	for i, col := range pgCols {
+		pgCols[i].Type = col.DatabaseType
 		switch col.DatabaseType {
+		case "BIT":
+			pgCols[i].Type = "BOOL"
 		case "DECIMAL":
-			pgCols[i].DatabaseType = "NUMERIC"
+			pgCols[i].Type = "NUMERIC"
 			pgCols[i].Precision = col.Precision
 			pgCols[i].Scale = col.Scale
 		case "SMALLINT":
-			pgCols[i].DatabaseType = "INT2"
+			pgCols[i].Type = "INT2"
 		case "INT":
-			pgCols[i].DatabaseType = "INT4"
+			pgCols[i].Type = "INT4"
 		case "BIGINT":
-			pgCols[i].DatabaseType = "INT8"
+			pgCols[i].Type = "INT8"
 		case "REAL":
-			pgCols[i].DatabaseType = "FLOAT4"
+			pgCols[i].Type = "FLOAT4"
 		case "FLOAT":
-			pgCols[i].DatabaseType = "FLOAT8"
+			pgCols[i].Type = "FLOAT8"
 		case "DATETIMEOFFSET":
-			pgCols[i].DatabaseType = "TIMESTAMPTZ"
+			pgCols[i].Type = "TIMESTAMPTZ"
 		case "DATETIME":
-			pgCols[i].DatabaseType = "TIMESTAMP"
+			pgCols[i].Type = "TIMESTAMP"
 		case "UNIQUEIDENTIFIER":
-			pgCols[i].DatabaseType = "UUID"
+			pgCols[i].Type = "UUID"
+		case "NVARCHAR":
+			pgCols[i].Type = "TEXT"
 		}
 
 	}

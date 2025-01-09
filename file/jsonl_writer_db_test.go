@@ -111,9 +111,9 @@ func TestJsonlWriter_FromMS(t *testing.T) {
 			defer cancel()
 
 			override := []data.Column{
-				{Name: "json_value", DatabaseType: "JSON"},
-				{Name: "jsonb_value", DatabaseType: "JSON"},
-				{Name: "array_value", DatabaseType: "JSON"},
+				{Name: "json_value", Type: "JSON"},
+				{Name: "jsonb_value", Type: "JSON"},
+				{Name: "array_value", Type: "JSON"},
 			}
 
 			// right now only Azure has json types

@@ -5,11 +5,8 @@ import (
 	"fmt"
 	"io"
 	"sync"
-	"time"
 
-	"github.com/google/uuid"
 	"github.com/johanan/mvr/data"
-	"github.com/shopspring/decimal"
 )
 
 type JSONLWriter struct {
@@ -60,43 +57,22 @@ func (w *JSONLWriter) ProcessRow(row []any) ([]byte, error) {
 	// Create a map of column names to values
 	jsonObject := make(map[string]any, len(w.datastream.DestColumns))
 	for i, col := range w.datastream.DestColumns {
-		switch col.DatabaseType {
-		case "TIMESTAMP":
-			if t, ok := row[i].(time.Time); ok {
-				jsonObject[col.Name] = t.Format(data.RFC3339NanoNoTZ)
-			} else {
-				jsonObject[col.Name] = row[i]
+		switch col.Type {
+		case "TIMESTAMP", "TIMESTAMPTZ", "UUID", "NUMERIC":
+			if row[i] == nil {
+				jsonObject[col.Name] = nil
+				continue
 			}
-		case "UUID":
-			switch v := row[i].(type) {
-			case [16]uint8:
-				uuidValue, err := uuid.FromBytes(v[:])
-				if err != nil {
-					return nil, err
-				}
-				jsonObject[col.Name] = uuidValue.String()
-			case []uint8:
-				uuidValue, err := uuid.FromBytes(v[:])
-				if err != nil {
-					return nil, err
-				}
-				jsonObject[col.Name] = uuidValue.String()
-			default:
-				jsonObject[col.Name] = row[i]
+			value, err := ValueToString(row[i], col)
+			if err != nil {
+				return nil, err
 			}
-		case "NUMERIC":
-			switch v := row[i].(type) {
-			case decimal.Decimal:
-				jsonObject[col.Name] = v.StringFixed(int32(col.Scale))
-			case []uint8:
-				jsonObject[col.Name] = string(v)
-			default:
-				jsonObject[col.Name] = row[i]
-			}
-		case "JSON":
+			jsonObject[col.Name] = value
+		case "JSON", "JSONB":
 			switch v := row[i].(type) {
 			case string:
 				var u interface{}
+				// Unmarshal the JSON string into an interface so it's not double JSON encoded
 				if err := json.Unmarshal([]byte(v), &u); err != nil {
 					return nil, fmt.Errorf("failed to unmarshal JSON: %v", err)
 				}

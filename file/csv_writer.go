@@ -48,6 +48,80 @@ func (cb *CSVBatchWriter) WriteBatch(batch data.Batch) error {
 	return nil
 }
 
+func ValueToString(value any, col data.Column) (string, error) {
+	switch col.Type {
+	case "TIMESTAMP":
+		if t, ok := value.(time.Time); ok {
+			return t.Format(data.RFC3339NanoNoTZ), nil
+		} else {
+			return cast.ToString(value), nil
+		}
+	case "TIMESTAMPTZ":
+		if t, ok := value.(time.Time); ok {
+			return t.Format(time.RFC3339Nano), nil
+		} else {
+			return cast.ToString(value), nil
+		}
+	case "JSON", "JSONB", "_TEXT":
+		// if this is a string unmarshall first then remarshal
+		var u interface{}
+		if v, ok := value.(string); ok {
+			if err := json.Unmarshal([]byte(v), &u); err != nil {
+				return "", err
+			}
+		} else {
+			u = value
+		}
+
+		j, err := json.Marshal(u)
+		if err != nil {
+			return "", err
+		}
+		return string(j), nil
+	default:
+		switch v := value.(type) {
+		// already a string
+		case string:
+			return v, nil
+		// UUID cases
+		case [16]uint8:
+			uuidValue, err := uuid.FromBytes(v[:])
+			if err != nil {
+				return "", err
+			}
+			return uuidValue.String(), nil
+		case uuid.UUID:
+			return v.String(), nil
+		case []uint8:
+			// make sure this is not a decimal byte array
+			// MS SQL makes these byte arrays of the string
+			if col.Type == "NUMERIC" {
+				return cast.ToString(value), nil
+			}
+			// continue with UUID logic
+			uuidValue, err := uuid.FromBytes(v)
+			if err != nil {
+				log.Fatalf("Failed to create UUID from []uint8: %v", err)
+			}
+			return uuidValue.String(), nil
+		// float and decimal cases
+		case float64:
+			return cast.ToString(v), nil
+		case decimal.Decimal:
+			return v.StringFixed(int32(col.Scale)), nil
+		case pgtype.Numeric:
+			j, err := json.Marshal(v)
+			if err != nil {
+				log.Fatalf("Failed to marshal pgtype.Numeric: %v", err)
+			}
+			return string(j), nil
+		// just cast it at this point
+		default:
+			return cast.ToString(v), nil
+		}
+	}
+}
+
 func (cw *CSVDataWriter) ProcessRow(row []any) ([]string, error) {
 	stringRow := make([]string, len(row))
 	for i, col := range row {
@@ -57,72 +131,11 @@ func (cw *CSVDataWriter) ProcessRow(row []any) ([]string, error) {
 			continue
 		}
 
-		switch dest.DatabaseType {
-		case "TIMESTAMP":
-			if t, ok := col.(time.Time); ok {
-				stringRow[i] = t.Format(data.RFC3339NanoNoTZ)
-			} else {
-				stringRow[i] = cast.ToString(col)
-			}
-		case "TIMESTAMPTZ":
-			if t, ok := col.(time.Time); ok {
-				stringRow[i] = t.Format(time.RFC3339Nano)
-			} else {
-				stringRow[i] = cast.ToString(col)
-			}
-		case "NUMERIC":
-			// get type of value
-			switch v := col.(type) {
-			case float64:
-				stringRow[i] = cast.ToString(v)
-			case decimal.Decimal:
-				stringRow[i] = v.StringFixed(int32(dest.Scale))
-			case pgtype.Numeric:
-				j, err := json.Marshal(v)
-				if err != nil {
-					log.Fatalf("Failed to marshal pgtype.Numeric: %v", err)
-				}
-				stringRow[i] = string(j)
-			default:
-				stringRow[i] = cast.ToString(v)
-			}
-		case "UUID":
-			switch v := col.(type) {
-			case [16]uint8:
-				uuidValue, err := uuid.FromBytes(v[:])
-				if err != nil {
-					log.Fatalf("Failed to create UUID from bytes: %v", err)
-				}
-				stringRow[i] = uuidValue.String()
-			case []uint8:
-				// Handle slice type
-				uuidValue, err := uuid.FromBytes(v)
-				if err != nil {
-					log.Fatalf("Failed to create UUID from []uint8: %v", err)
-				}
-				stringRow[i] = uuidValue.String()
-			default:
-				stringRow[i] = cast.ToString(col)
-			}
-		case "JSON", "JSONB", "_TEXT":
-			// if this is a string unmarshall first then remarshal
-			var u interface{}
-			if v, ok := col.(string); ok {
-				if err := json.Unmarshal([]byte(v), &u); err != nil {
-					log.Fatalf("Failed to unmarshal JSON: %v", err)
-				}
-			} else {
-				u = col
-			}
-
-			j, err := json.Marshal(u)
-			if err != nil {
-				log.Fatalf("Failed to marshal JSON: %v", err)
-			}
-			stringRow[i] = string(j)
-		default:
-			stringRow[i] = cast.ToString(col)
+		value, err := ValueToString(col, dest)
+		if err != nil {
+			return nil, err
 		}
+		stringRow[i] = value
 	}
 
 	return stringRow, nil

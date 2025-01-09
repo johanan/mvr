@@ -4,6 +4,9 @@ compression: snappy
 
 tables:
   - stream_name: public.users
+    columns:
+      - name: "unique_id"
+        type: "TEXT"
   - stream_name: public.numbers
     format: jsonl
     compression: gzip
@@ -12,4 +15,4 @@ tables:
   - stream_name: public.strings
     columns:
       - name: "array_value"
-        database_type: "JSONB"
+        type: "JSONB"

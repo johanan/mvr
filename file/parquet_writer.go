@@ -89,10 +89,10 @@ func numericLookup(precision int, scale int) MappedType {
 }
 
 func checkType(col data.Column) MappedType {
-	if col.DatabaseType == "NUMERIC" {
+	if col.Type == "NUMERIC" {
 		return numericLookup(int(col.Precision), int(col.Scale))
 	}
-	if t, ok := parquetTypeMap[col.DatabaseType]; ok {
+	if t, ok := parquetTypeMap[col.Type]; ok {
 		return t
 	}
 	return MappedType{parquet.Types.ByteArray, schema.StringLogicalType{}, reflect.TypeOf(string(""))}
@@ -147,7 +147,7 @@ func (pb *ParquetBatchWriter) WriteBatch(batch data.Batch) error {
 			// has value so set definition level to 1
 			pb.definitionLevels[i] = append(pb.definitionLevels[i], 1)
 
-			switch col.DatabaseType {
+			switch col.Type {
 			case "INT2":
 				buf, ok := pb.columnBuffers[i].([]int32)
 				if !ok {
@@ -268,6 +268,17 @@ func (pb *ParquetBatchWriter) WriteBatch(batch data.Batch) error {
 					return fmt.Errorf("expected time.Time for TIMESTAMP column %s, got %T", col.Name, row[i])
 				}
 				pb.columnBuffers[i] = append(buf, v.UnixNano())
+			case "TEXT", "VARCHAR":
+				buf, ok := pb.columnBuffers[i].([]string)
+				if !ok {
+					return fmt.Errorf("type assertion failed for TEXT")
+				}
+				// reuse the CSV logic to convert to string
+				value, err := ValueToString(row[i], col)
+				if err != nil {
+					return fmt.Errorf("failed to convert TEXT for column %s: %v", col.Name, err)
+				}
+				pb.columnBuffers[i] = append(buf, value)
 			default:
 				// cast everything else to string
 				buf, ok := pb.columnBuffers[i].([]string)
@@ -520,7 +531,7 @@ func buildNode(col data.Column) schema.Node {
 	var typeLen int
 	switch mapped.ParquetType {
 	case parquet.Types.FixedLenByteArray:
-		if col.DatabaseType == "UUID" {
+		if col.Type == "UUID" {
 			typeLen = 16
 		} else {
 			typeLen = calculateBytesForPrecision(int(col.Precision))
