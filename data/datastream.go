@@ -44,9 +44,9 @@ type Param struct {
 type Column struct {
 	Name         string `json:"name" yaml:"name"`
 	DatabaseType string `json:"database_type" yaml:"database_type"`
+	Type         string `json:"type" yaml:"type"`
 	Length       int64  `json:"length,omitempty" yaml:"length,omitempty"`
 	Nullable     bool   `json:"nullable" yaml:"nullable"`
-	ScanType     string `json:"scan_type" yaml:"scan_type"`
 	Position     int    `json:"position" yaml:"position"`
 	Scale        int64  `json:"scale,omitempty" yaml:"scale,omitempty"`
 	Precision    int64  `json:"precision,omitempty" yaml:"precision,omitempty"`
@@ -333,8 +333,8 @@ func OverrideColumns(original []Column, overrides []Column) []Column {
 
 	for i, col := range original {
 		if overrideCol, found := overrideMap[strings.ToLower(col.Name)]; found {
-			if overrideCol.DatabaseType != "" {
-				original[i].DatabaseType = strings.ToUpper(overrideCol.DatabaseType)
+			if overrideCol.Type != "" {
+				original[i].Type = strings.ToUpper(overrideCol.Type)
 			}
 			if overrideCol.Length != 0 {
 				original[i].Length = overrideCol.Length

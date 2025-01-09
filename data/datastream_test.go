@@ -82,9 +82,9 @@ sql: ""
 compression: "gzip"
 columns:
   - name: "id"
-    database_type: "INT"
+    type: "INT"
   - name: "name"
-    database_type: "VARCHAR"
+    type: "VARCHAR"
 `),
 			cliArgs: &StreamConfig{
 				StreamName: "OverriddenStream",
@@ -98,8 +98,8 @@ columns:
 				SQL:         "SELECT id, name FROM users",
 				Compression: "gzip",
 				Columns: []Column{
-					{Name: "id", DatabaseType: "INT"},
-					{Name: "name", DatabaseType: "VARCHAR"},
+					{Name: "id", Type: "INT"},
+					{Name: "name", Type: "VARCHAR"},
 				},
 				BatchSize: 1000,
 				// Initialize other fields as needed

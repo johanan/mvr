@@ -315,22 +315,125 @@ func TestConvertDecimalStringToUnscaledInt(t *testing.T) {
 	}
 }
 
+type parquetTypes interface {
+	~int32 | ~int64 | ~float32 | ~float64 | ~string | ~bool | ~[]byte
+}
+
+func GetRowGroupColumn[T parquetTypes](reader *file.Reader, colIndex int) ([]T, []int16, error) {
+	// for now we just have one row group
+	rgr := reader.RowGroup(0)
+	rgMeta := rgr.MetaData()
+	numRows := rgMeta.NumRows()
+
+	column, _ := rgr.Column(colIndex)
+	chunkMeta, _ := rgMeta.ColumnChunk(colIndex)
+	stats, _ := chunkMeta.Statistics()
+	numValues := stats.NumValues()
+	//numValues := chunkMeta.NumValues()
+
+	defLevels := make([]int16, numRows)
+	values := make([]T, numValues)
+	switch any(*new(T)).(type) {
+	case int32:
+		r, _ := column.(*file.Int32ColumnChunkReader)
+		int32Values := any(values).([]int32)
+		r.ReadBatch(numRows, int32Values, defLevels, nil)
+	case int64:
+		r, _ := column.(*file.Int64ColumnChunkReader)
+		int64Values := any(values).([]int64)
+		r.ReadBatch(numRows, int64Values, defLevels, nil)
+	case string:
+		r, _ := column.(*file.ByteArrayColumnChunkReader)
+		byteArrayValues := make([]parquet.ByteArray, numValues)
+		r.ReadBatch(numRows, byteArrayValues, defLevels, nil)
+		// Convert parquet.ByteArray to string
+		values = make([]T, numValues)
+		stringValues := any(values).([]string)
+		for i, ba := range byteArrayValues {
+			stringValues[i] = string(ba)
+		}
+	case []byte:
+		r, _ := column.(*file.FixedLenByteArrayColumnChunkReader)
+		byteArrayValues := make([]parquet.FixedLenByteArray, numValues)
+		r.ReadBatch(numRows, byteArrayValues, defLevels, nil)
+		// Convert parquet.FixedLenByteArray to []byte
+		values = make([]T, numValues)
+		byteValues := any(values).([][]byte)
+		for i, ba := range byteArrayValues {
+			byteValues[i] = ba
+		}
+	}
+	return values, defLevels, nil
+}
+
+func testParquetColumn[T parquetTypes](t *testing.T, reader *file.Reader, colIndex int, expected []T, defExpected []int16) {
+	values, defLevels, err := GetRowGroupColumn[T](reader, colIndex)
+	assert.NoError(t, err)
+	assert.Equal(t, expected, values)
+	assert.Equal(t, defExpected, defLevels)
+}
+
 func Test_FullRoundTrip_ToPG(t *testing.T) {
 	tests := []struct {
-		name string
-		sql  string
+		name        string
+		config      *data.StreamConfig
+		expected    interface{}
+		defExpected []int16
 	}{
 		{
-			name: "Numbers Test",
-			sql:  "SELECT * FROM public.numbers",
+			name:        "INT 2",
+			config:      &data.StreamConfig{SQL: "SELECT smallint_value FROM public.numbers", Format: "parquet"},
+			expected:    []int32{int32(1), int32(2), int32(3), int32(32767), int32(0)},
+			defExpected: []int16{1, 1, 1, 1, 1},
 		},
 		{
-			name: "Strings Test",
-			sql:  "SELECT * FROM public.strings",
+			name:        "Strings Test",
+			config:      &data.StreamConfig{SQL: "SELECT varchar_value FROM public.strings", Format: "parquet"},
+			expected:    []string{"a", "b"},
+			defExpected: []int16{1, 1},
 		},
 		{
-			name: "Default users Table Test",
-			sql:  "SELECT * FROM public.users",
+			name:        "Users Name Test",
+			config:      &data.StreamConfig{SQL: "SELECT name FROM public.users", Format: "parquet"},
+			expected:    []string{"John Doe", "Test Tester"},
+			defExpected: []int16{1, 1},
+		},
+		{
+			name:        "Users Created Test",
+			config:      &data.StreamConfig{SQL: "SELECT created FROM public.users", Format: "parquet"},
+			expected:    []int64{1728408120000000000, 1728408120000000000},
+			defExpected: []int16{1, 1},
+		},
+		{
+			name:        "Users CreatedZ Test",
+			config:      &data.StreamConfig{SQL: "SELECT createdz FROM public.users", Format: "parquet"},
+			expected:    []int64{1728408120000000000, 1728408120000000000},
+			defExpected: []int16{1, 1},
+		},
+		{
+			name:   "Users Unique ID Test",
+			config: &data.StreamConfig{SQL: "SELECT unique_id FROM public.users", Format: "parquet"},
+			expected: [][]byte{{160, 238, 188, 153, 156, 11, 78, 248, 187, 109, 107, 185, 189, 56, 10, 17},
+				{160, 238, 188, 153, 156, 11, 78, 248, 187, 109, 107, 185, 189, 56, 10, 18}},
+			defExpected: []int16{1, 1},
+		},
+		{
+			name:        "Users Nullable ID Test",
+			config:      &data.StreamConfig{SQL: "SELECT nullable_id FROM public.users", Format: "parquet"},
+			expected:    [][]byte{},
+			defExpected: []int16{0, 0},
+		},
+		{
+			name:        "Users Active Test",
+			config:      &data.StreamConfig{SQL: "SELECT active FROM public.users", Format: "parquet"},
+			expected:    []bool{true, false},
+			defExpected: []int16{1, 1},
+		},
+		{
+			name:        "Users UUID to string Test",
+			config:      &data.StreamConfig{SQL: "SELECT unique_id FROM public.users", Format: "parquet", Columns: []data.Column{{Name: "unique_id", Type: "TEXT"}}},
+			expected:    []string{"a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11", "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a12"},
+			defExpected: []int16{1, 1},
 		},
 	}
 	os.Setenv("TZ", "UTC")
@@ -341,20 +444,29 @@ func Test_FullRoundTrip_ToPG(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 
-			// actually query the database
-			sc := &data.StreamConfig{StreamName: tt.name, Format: "parquet", SQL: tt.sql}
 			local_url, _ := url.Parse(local_db_url)
 
 			pgr, _ := database.NewPGDataReader(local_url)
-			pgDs, _ := pgr.CreateDataStream(ctx, local_url, sc)
+			pgDs, _ := pgr.CreateDataStream(ctx, local_url, tt.config)
 			defer pgr.Close()
 
 			writer := NewParquetDataWriter(pgDs, &buf)
 
-			err := core.Execute(ctx, 1, sc, pgDs, pgr, writer)
+			err := core.Execute(ctx, 1, tt.config, pgDs, pgr, writer)
 			assert.NoError(t, err)
 
-			// going to have to come back to this
+			reader, err := file.NewParquetReader(bytes.NewReader(buf.Bytes()), file.WithReadProps(parquet.NewReaderProperties(nil)))
+			assert.NoError(t, err)
+			switch expected := tt.expected.(type) {
+			case []int32:
+				testParquetColumn(t, reader, 0, expected, tt.defExpected)
+			case []int64:
+				testParquetColumn(t, reader, 0, expected, tt.defExpected)
+			case []string:
+				testParquetColumn(t, reader, 0, expected, tt.defExpected)
+			case [][]byte:
+				testParquetColumn(t, reader, 0, expected, tt.defExpected)
+			}
 		})
 	}
 	os.Unsetenv("TZ")
@@ -372,8 +484,8 @@ func TestParquetWriter(t *testing.T) {
 		BatchSize: 10,
 		Mux:       sync.Mutex{},
 		DestColumns: []data.Column{
-			{Name: "id", DatabaseType: "INT8"},
-			{Name: "name", DatabaseType: "TEXT"},
+			{Name: "id", Type: "INT8"},
+			{Name: "name", Type: "TEXT"},
 		},
 	}
 
@@ -405,39 +517,19 @@ func TestParquetWriter(t *testing.T) {
 	reader, err := file.NewParquetReader(bytes.NewReader(buf.Bytes()), file.WithReadProps(parquet.NewReaderProperties(nil)))
 	assert.NoError(t, err)
 
+	idValues, defLevels, err := GetRowGroupColumn[int64](reader, 0)
+	assert.NoError(t, err)
+	assert.Equal(t, []int64{1, 2, 3, 4, 5}, idValues)
+	assert.Equal(t, []int16{1, 1, 1, 1, 1}, defLevels)
+
+	nameValues, defLevels, err := GetRowGroupColumn[string](reader, 1)
+	assert.NoError(t, err)
+	assert.Equal(t, []string{"Alice", "Bob", "Charlie"}, nameValues)
+	assert.Equal(t, []int16{1, 1, 0, 1, 0}, defLevels)
+
 	metadata := reader.MetaData()
 	assert.NotNil(t, metadata)
 	assert.Equal(t, 2, metadata.Schema.NumColumns())
 	assert.Equal(t, 5, metadata.FileMetaData.NumRows)
-
-	cols := metadata.Schema.NumColumns()
-
-	for r := 0; r < reader.NumRowGroups(); r++ {
-		rgr := reader.RowGroup(r)
-		rgMeta := rgr.MetaData()
-		for c := 0; c < cols; c++ {
-			var valueBuffer interface{}
-			defLevels := make([]int16, rgMeta.NumRows())
-			chunkMeta, _ := rgMeta.ColumnChunk(c)
-			column, _ := rgr.Column(c)
-			stats, _ := chunkMeta.Statistics()
-			switch r := column.(type) {
-			case *file.Int64ColumnChunkReader:
-				valueBuffer = make([]int64, stats.NumValues())
-				values := valueBuffer.([]int64)
-				r.ReadBatch(5, values, defLevels, nil)
-				assert.Equal(t, []int64{1, 2, 3, 4, 5}, values)
-				assert.Equal(t, []int16{1, 1, 1, 1, 1}, defLevels)
-			case *file.ByteArrayColumnChunkReader:
-				valueBuffer = make([]parquet.ByteArray, stats.NumValues())
-				values := valueBuffer.([]parquet.ByteArray)
-				r.ReadBatch(5, values, defLevels, nil)
-				assert.Equal(t, 3, len(values))
-				assert.Equal(t, "Alice", string(values[0]))
-				assert.Equal(t, []int16{1, 1, 0, 1, 0}, defLevels)
-			}
-		}
-
-	}
 
 }

@@ -65,6 +65,7 @@ func (sf *SnowflakeDataReader) CreateDataStream(ctx context.Context, connUrl *ur
 
 	columns := MapToMvrColumns(dbCols)
 	destColumns := sfColumnsToPg(columns)
+	srcColumns := sfColumnsToPg(columns)
 
 	if len(config.Columns) > 0 {
 		destColumns = data.OverrideColumns(destColumns, config.Columns)
@@ -72,7 +73,7 @@ func (sf *SnowflakeDataReader) CreateDataStream(ctx context.Context, connUrl *ur
 
 	batchChan := make(chan Batch, config.GetBatchCount())
 	logColumns(columns, destColumns)
-	return &DataStream{TotalRows: 0, BatchChan: batchChan, BatchSize: config.GetBatchSize(), Columns: columns, DestColumns: destColumns}, nil
+	return &DataStream{TotalRows: 0, BatchChan: batchChan, BatchSize: config.GetBatchSize(), Columns: srcColumns, DestColumns: destColumns}, nil
 }
 
 func (sf *SnowflakeDataReader) ExecuteDataStream(ctx context.Context, ds *DataStream, config *data.StreamConfig) error {
@@ -138,19 +139,20 @@ func sfColumnsToPg(columns []Column) []Column {
 	pgCols := make([]Column, len(columns))
 	copy(pgCols, columns)
 	for i, col := range pgCols {
+		pgCols[i].Type = col.DatabaseType
 		switch col.DatabaseType {
 		case "FIXED":
-			pgCols[i].DatabaseType = "NUMERIC"
+			pgCols[i].Type = "NUMERIC"
 			pgCols[i].Precision = col.Precision
 			pgCols[i].Scale = col.Scale
 		case "TIMESTAMP_NTZ", "TIMESTAMP_LTZ":
-			pgCols[i].DatabaseType = "TIMESTAMP"
+			pgCols[i].Type = "TIMESTAMP"
 
 		case "TIMESTAMP_TZ":
-			pgCols[i].DatabaseType = "TIMESTAMPTZ"
+			pgCols[i].Type = "TIMESTAMPTZ"
 
 		case "ARRAY", "VARIANT":
-			pgCols[i].DatabaseType = "JSONB"
+			pgCols[i].Type = "JSONB"
 		}
 	}
 	return pgCols

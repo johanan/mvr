@@ -137,7 +137,7 @@ columns:
     database_type: JSON`,
 			expected: `char_value,varchar_value,text_value,json_value,jsonb_value,array_value
 a         ,a,a,{},{},[]
-b         ,b,b,"{""key"":""value""}","{""key"":""value""}","[""a""]"
+b         ,b,b,"{""key"": ""value""}","{""key"": ""value""}","[""a""]"
 `,
 		},
 		{

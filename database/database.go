@@ -23,8 +23,8 @@ func logColumns(cols, destCols []Column) {
 	if err != nil {
 		log.Debug().Err(err).Msg("Failed to marshal destColumns")
 	}
-
-	log.Debug().Str("columns", string(jsonColumns)).Str("destColumns", string(jsonDest)).Msg("Created data stream")
+	// dest columns can be overwritten
+	log.Debug().Str("src_columns", string(jsonColumns)).Str("dest_columns", string(jsonDest)).Msg("Created data stream")
 }
 
 func MapToMvrColumns(columns []*sql.ColumnType) []Column {
@@ -36,9 +36,9 @@ func MapToMvrColumns(columns []*sql.ColumnType) []Column {
 		cols = append(cols, Column{
 			Name:         col.Name(),
 			DatabaseType: col.DatabaseTypeName(),
+			Type:         "",
 			Length:       length,
 			Nullable:     nullable,
-			ScanType:     col.ScanType().Name(),
 			Position:     i,
 			Scale:        scale,
 			Precision:    precision,

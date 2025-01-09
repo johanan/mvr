@@ -75,7 +75,11 @@ func (pool *PGDataReader) CreateDataStream(ctx context.Context, connUrl *url.URL
 	}
 
 	columns := MapToMvrColumns(dbCols)
-	destColumns := columns
+	for i, col := range columns {
+		columns[i].Type = col.DatabaseType
+	}
+	destColumns := make([]data.Column, len(columns))
+	copy(destColumns, columns)
 
 	if len(config.Columns) > 0 {
 		destColumns = data.OverrideColumns(destColumns, config.Columns)
