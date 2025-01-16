@@ -119,7 +119,12 @@ var mvsCmd = &cobra.Command{
 				bar = file.NewProgressBar()
 			}
 
-			path, writer, err := file.GetPathAndIO(config.DestConn.ParsedUrl, bar, sConfig.Filename, sConfig.Compression, sConfig.Format)
+			path, err := file.BuildFullPath(config.DestConn.ParsedUrl, sConfig.Filename)
+			if err != nil {
+				return fmt.Errorf("error building path: %v", err)
+			}
+
+			writer, err := file.GetPathAndIO(ctx, path, bar, sConfig.Compression, sConfig.Format)
 			if err != nil {
 				return fmt.Errorf("error running task: %v", err)
 			}

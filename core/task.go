@@ -71,12 +71,14 @@ func Execute(ctx context.Context, concurrency int, config *data.StreamConfig, da
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	defer writer.Close()
 	errCh := make(chan error, concurrency+1)
 
 	defer func() {
 		if err := writer.Flush(); err != nil {
-			log.Fatal().Msgf("Failed to flush writer: %v", err)
+			errCh <- fmt.Errorf("flush writer: %w", err)
+		}
+		if err := writer.Close(); err != nil {
+			errCh <- fmt.Errorf("close writer: %w", err)
 		}
 		log.Trace().Msg("Flushed writer")
 	}()

@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/johanan/mvr/core"
 	"github.com/johanan/mvr/data"
@@ -45,6 +46,8 @@ func TestJsonlWriter_FromPG(t *testing.T) {
 		},
 	}
 	os.Setenv("TZ", "UTC")
+	loc := time.Local
+	time.Local = time.UTC
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create a buffer to write the CSV data to
@@ -68,6 +71,7 @@ func TestJsonlWriter_FromPG(t *testing.T) {
 			assert.Equal(t, tt.expected, buf.String())
 		})
 	}
+	time.Local = loc
 	os.Unsetenv("TZ")
 }
 
