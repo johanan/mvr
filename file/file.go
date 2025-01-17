@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"compress/gzip"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/url"
@@ -23,14 +24,10 @@ func NewProgressBar() *progressbar.ProgressBar {
 		progressbar.OptionSetWriter(os.Stderr),
 		progressbar.OptionShowBytes(true),
 		progressbar.OptionShowTotalBytes(true),
-		progressbar.OptionSetWidth(10),
+		progressbar.OptionSetWidth(1),
 		progressbar.OptionThrottle(1*time.Second),
 		progressbar.OptionShowCount(),
-		progressbar.OptionOnCompletion(func() {
-			fmt.Fprint(os.Stderr, "\n")
-		}),
 		progressbar.OptionSpinnerType(14),
-		progressbar.OptionFullWidth(),
 		progressbar.OptionSetRenderBlankState(false),
 		progressbar.OptionSetSpinnerChangeInterval(1*time.Second),
 	)
@@ -62,12 +59,14 @@ func BuildFullPath(parsed *url.URL, filename string) (*url.URL, error) {
 type BufferedWriter struct {
 	bufWriter *bufio.Writer
 	resources []io.WriteCloser
+	open      bool
 }
 
 func NewBufferedWriter(writer io.Writer, closers ...io.WriteCloser) *BufferedWriter {
 	return &BufferedWriter{
 		bufWriter: bufio.NewWriter(writer),
 		resources: closers,
+		open:      true,
 	}
 }
 
@@ -76,14 +75,18 @@ func (b *BufferedWriter) Write(p []byte) (n int, err error) {
 }
 
 func (b *BufferedWriter) Close() error {
-	if err := b.bufWriter.Flush(); err != nil {
-		return err
-	}
-
 	var closeErr error
-	for _, resource := range b.resources {
-		if err := resource.Close(); err != nil {
+	if b.open {
+		b.open = false
+
+		if err := b.bufWriter.Flush(); err != nil {
 			closeErr = err
+		}
+
+		for _, resource := range b.resources {
+			if err := resource.Close(); err != nil {
+				closeErr = errors.Join(closeErr, err)
+			}
 		}
 	}
 
@@ -167,7 +170,7 @@ func AddJSONL(ds *data.DataStream, writer io.WriteCloser) *JSONLWriter {
 	return NewJSONLWriter(ds, writer)
 }
 
-func AddParquet(ds *data.DataStream, writer io.Writer) *ParquetDataWriter {
+func AddParquet(ds *data.DataStream, writer io.WriteCloser) *ParquetDataWriter {
 	return NewParquetDataWriter(ds, writer)
 }
 

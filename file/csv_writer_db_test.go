@@ -103,6 +103,7 @@ params:
 
 			err = core.Execute(ctx, 1, sc, pgDs, pgr, writer)
 			assert.NoError(t, err)
+			writer.Close()
 
 			assert.Equal(t, tt.expected, buf.String())
 		})
@@ -195,6 +196,7 @@ params:
 
 			err = core.Execute(ctx, 1, sc, msDs, msr, writer)
 			assert.NoError(t, err)
+			writer.Close()
 
 			assert.Equal(t, tt.expected, buf.String())
 		})

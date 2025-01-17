@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"runtime"
@@ -17,11 +18,13 @@ import (
 	"gopkg.in/yaml.v2"
 )
 
-var mvsFormat string
-var mvsFilename string
-var mvsCompression string
-var mvsCfgFile string
-var mvsSelect string
+var (
+	mvsFormat      string
+	mvsFilename    string
+	mvsCompression string
+	mvsCfgFile     string
+	mvsSelect      string
+)
 
 var mvsCmd = &cobra.Command{
 	Use:   "mvs",
@@ -97,11 +100,12 @@ var mvsCmd = &cobra.Command{
 		tablesToProcess := filterTables(multiConfig.Tables, mvsSelect)
 
 		for i, table := range tablesToProcess {
+			var acc error
 			log.Info().Msgf("Starting %d/%d", i+1, len(tablesToProcess))
 			// invert so that each table can override the root
 			sConfig, err := data.BuildConfig(multiBytes, &table)
 			if err != nil {
-				return fmt.Errorf("error parsing template: %v", err)
+				return fmt.Errorf("error building config: %v", err)
 			}
 
 			err = sConfig.Validate()
@@ -110,7 +114,12 @@ var mvsCmd = &cobra.Command{
 			}
 			log.Debug().Interface("config", sConfig).Msg("Config")
 
-			start := time.Now()
+			path, err := file.BuildFullPath(config.DestConn.ParsedUrl, sConfig.Filename)
+			if err != nil {
+				return fmt.Errorf("error building path: %v", err)
+			}
+
+			result := core.NewFlowResult(config.SourceConn.ParsedUrl, sConfig, time.Now()).SetPath(path)
 
 			var bar *progressbar.ProgressBar
 			if quiet || silent {
@@ -119,41 +128,53 @@ var mvsCmd = &cobra.Command{
 				bar = file.NewProgressBar()
 			}
 
-			path, err := file.BuildFullPath(config.DestConn.ParsedUrl, sConfig.Filename)
-			if err != nil {
-				return fmt.Errorf("error building path: %v", err)
-			}
-
 			writer, err := file.GetPathAndIO(ctx, path, bar, sConfig.Compression, sConfig.Format)
 			if err != nil {
-				return fmt.Errorf("error running task: %v", err)
+				errFmt := fmt.Errorf("error getting path and IO: %v", err)
+				result.Error(errFmt.Error()).LogContext(log.Error()).Send()
+				return errFmt
 			}
-			defer writer.Close()
+
 			log.Info().Msgf("Writing to %s", path)
 
 			datastream, err := reader.CreateDataStream(ctx, config.SourceConn.ParsedUrl, sConfig)
 			if err != nil {
+				result.Error(err.Error()).LogContext(log.Error()).Send()
 				return err
 			}
 
 			fileWriter, err := file.AddFileWriter(sConfig.Format, datastream, writer)
 			if err != nil {
+				result.Error(err.Error()).LogContext(log.Error()).Send()
 				return err
 			}
 
-			core.Execute(ctx, concurrency, sConfig, datastream, reader, fileWriter)
-			fileWriter.Close()
-			bar.Finish()
-			elapsed := time.Since(start)
-			log.Info().
-				Str("source", config.SourceConn.ParsedUrl.Host).
-				Str("sql", sConfig.SQL).
-				Str("path", path.String()).
-				Int("rows", datastream.TotalRows).
-				Dur("elapsed", elapsed).
-				Str("duration", elapsed.String()).
-				Float64("bytes", bar.State().CurrentBytes).
-				Msg("Finished writing data")
+			err = core.Execute(ctx, concurrency, sConfig, datastream, reader, fileWriter)
+			if err != nil {
+				result.Error(err.Error()).LogContext(log.Error()).Send()
+				return err
+			}
+
+			if err := fileWriter.Flush(); err != nil {
+				acc = errors.Join(acc, fmt.Errorf("flush writer: %w", err))
+
+			}
+			if err := fileWriter.Close(); err != nil {
+				acc = errors.Join(acc, fmt.Errorf("close writer: %w", err))
+
+			}
+			if err := writer.Close(); err != nil {
+				acc = errors.Join(acc, fmt.Errorf("close writer: %w", err))
+			}
+
+			if acc != nil {
+				result.Error(acc.Error()).LogContext(log.Error()).Send()
+				return acc
+			}
+			log.Trace().Msg("Flushed writer")
+
+			result.SetRows(datastream.TotalRows).SetBytes(bar.State().CurrentBytes).Success()
+			result.LogContext(log.Info()).Msg("Finished writing data")
 		}
 
 		return nil

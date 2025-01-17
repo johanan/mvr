@@ -455,6 +455,7 @@ func Test_FullRoundTrip_ToPG(t *testing.T) {
 
 			err := core.Execute(ctx, 1, tt.config, pgDs, pgr, writer)
 			assert.NoError(t, err)
+			writer.Close()
 
 			reader, err := file.NewParquetReader(bytes.NewReader(buf.Bytes()), file.WithReadProps(parquet.NewReaderProperties(nil)))
 			assert.NoError(t, err)

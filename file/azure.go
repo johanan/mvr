@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/url"
+	"path"
 	"strings"
 	"sync"
 
@@ -13,11 +14,11 @@ import (
 )
 
 type AzureBlobConfig struct {
-	blobUrl       *url.URL
-	withContainer string
-	container     string
-	blobName      string
-	sasToken      string
+	blobUrl   *url.URL
+	base      string
+	container string
+	blobName  string
+	sasToken  string
 }
 
 type AzureBlob struct {
@@ -25,6 +26,8 @@ type AzureBlob struct {
 	client *azblob.Client
 	writer io.WriteCloser
 	wg     *sync.WaitGroup
+	errCh  chan error
+	open   bool
 }
 
 func (a *AzureBlob) Write(p []byte) (n int, err error) {
@@ -32,9 +35,23 @@ func (a *AzureBlob) Write(p []byte) (n int, err error) {
 }
 
 func (a *AzureBlob) Close() error {
-	a.writer.Close()
-	a.wg.Wait()
+	if a.open {
+		a.open = false
+
+		if err := a.writer.Close(); err != nil {
+			return fmt.Errorf("failed to close writer: %w", err)
+		}
+		a.wg.Wait()
+		select {
+		case err := <-a.errCh:
+			if err != nil {
+				return fmt.Errorf("upload failed: %w", err)
+			}
+		default:
+		}
+	}
 	return nil
+
 }
 
 func (a *AzureBlobConfig) GetWriter(ctx context.Context) (*AzureBlob, error) {
@@ -44,14 +61,14 @@ func (a *AzureBlobConfig) GetWriter(ctx context.Context) (*AzureBlob, error) {
 		if err != nil {
 			return nil, fmt.Errorf("AzureBlob: %v", err)
 		}
-		client, err = azblob.NewClient(a.withContainer, cred, nil)
+		client, err = azblob.NewClient(a.base, cred, nil)
 		if err != nil {
 			return nil, fmt.Errorf("AzureBlob: %v", err)
 		}
 	}
 
 	if a.sasToken != "" {
-		urlWithSas := fmt.Sprintf("%s?%s", a.withContainer, a.sasToken)
+		urlWithSas := fmt.Sprintf("%s?%s", a.base, a.sasToken)
 		var err error
 		client, err = azblob.NewClientWithNoCredential(urlWithSas, nil)
 		if err != nil {
@@ -62,16 +79,19 @@ func (a *AzureBlobConfig) GetWriter(ctx context.Context) (*AzureBlob, error) {
 
 	wg := sync.WaitGroup{}
 	wg.Add(1)
+	errCh := make(chan error, 1)
+
 	go func() {
 		defer wg.Done()
 		defer pr.Close()
-		_, err := client.UploadStream(ctx, "", a.blobName, pr, nil)
+		_, err := client.UploadStream(ctx, a.container, a.blobName, pr, nil)
 		if err != nil {
 			pw.CloseWithError(err)
+			errCh <- err
 		}
 	}()
 
-	return &AzureBlob{AzureBlobConfig: a, writer: pw, client: client, wg: &wg}, nil
+	return &AzureBlob{AzureBlobConfig: a, writer: pw, client: client, wg: &wg, errCh: errCh, open: true}, nil
 
 }
 
@@ -79,16 +99,11 @@ func ParseAzurite(blobUrl *url.URL) (*AzureBlobConfig, error) {
 	sasToken, _ := blobUrl.User.Password()
 	blobUrl.User = nil
 
-	segments := strings.SplitN(blobUrl.Path, "/", 4)
-	if len(segments) <= 3 {
-		return nil, fmt.Errorf("AzureBlob: invalid path needs container")
-	}
-	account := segments[1]
-	container := segments[2]
-	blobName := segments[3]
-	withContainer := fmt.Sprintf("http://%s:%s/%s/%s", blobUrl.Hostname(), blobUrl.Port(), account, container)
+	blobName := path.Base(blobUrl.Path)
+	container := path.Dir(blobUrl.Path)
+	base := fmt.Sprintf("http://%s:%s", blobUrl.Hostname(), blobUrl.Port())
 
-	return &AzureBlobConfig{withContainer: withContainer, blobUrl: blobUrl, container: container, blobName: blobName, sasToken: sasToken}, nil
+	return &AzureBlobConfig{base: base, blobUrl: blobUrl, container: container, blobName: blobName, sasToken: sasToken}, nil
 }
 
 func ParseAzureBlobURL(blobUrl *url.URL) (*AzureBlobConfig, error) {
@@ -114,13 +129,9 @@ func ParseAzureBlobURL(blobUrl *url.URL) (*AzureBlobConfig, error) {
 	if !strings.Contains(strings.ToLower(blobUrl.Hostname()), "blob.core.windows.net") {
 		return nil, fmt.Errorf("AzureBlob: only blob.core.windows.net is supported for https")
 	}
-	segments := strings.SplitN(blobUrl.Path, "/", 3)
-	if len(segments) <= 2 {
-		return nil, fmt.Errorf("AzureBlob: invalid path needs container and blob path")
-	}
-	container := segments[1]
-	blobName := segments[2]
-	withContainer := fmt.Sprintf("https://%s/%s", blobUrl.Hostname(), container)
+	blobName := path.Base(blobUrl.Path)
+	container := path.Dir(blobUrl.Path)
+	base := fmt.Sprintf("%s://%s", blobUrl.Scheme, blobUrl.Host)
 
-	return &AzureBlobConfig{withContainer: withContainer, blobUrl: blobUrl, container: container, blobName: blobName, sasToken: sasToken}, nil
+	return &AzureBlobConfig{base: base, blobUrl: blobUrl, container: container, blobName: blobName, sasToken: sasToken}, nil
 }

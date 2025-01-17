@@ -148,8 +148,12 @@ func (cw *CSVDataWriter) Flush() error {
 }
 
 func (cw *CSVDataWriter) Close() error {
-	cw.Flush()
-	cw.resource.Close()
+	if err := cw.Flush(); err != nil {
+		return err
+	}
+	if err := cw.resource.Close(); err != nil {
+		return err
+	}
 	return nil
 }
 

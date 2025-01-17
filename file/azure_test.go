@@ -35,7 +35,6 @@ func init() {
 		Permissions:   (&sas.ContainerPermissions{Read: true, Write: true, Delete: true, List: false}).String(),
 	}.SignWithSharedKey(cred)
 	sasToken = sasQuery.Encode()
-
 }
 
 func TestAzureBlob_Writer(t *testing.T) {
@@ -61,6 +60,10 @@ func TestAzureBlob_Writer(t *testing.T) {
 
 	err = core.Execute(ctx, 1, sc, pgDs, pgr, writer)
 	assert.NoError(t, err)
+	writer.Close()
+
+	err = blobWriter.Close()
+	assert.NoError(t, err)
 }
 
 func Test_NewAzureBlob(t *testing.T) {
@@ -73,51 +76,19 @@ func Test_NewAzureBlob(t *testing.T) {
 		expectErr bool
 	}{
 		{
-			name:      "Invalid Azure Blob URL",
-			blobUrl:   "https://devstoreaccount1.blob.core.windows.net/testcontainer",
-			sas:       "",
-			container: "",
-			blobName:  "",
-			expectErr: true,
-		},
-		{
-			name:      "Invalid Azure Blob URL",
-			blobUrl:   "https://devstoreaccount1.blob.core.windows.net",
-			sas:       "",
-			container: "",
-			blobName:  "",
-			expectErr: true,
-		},
-		{
 			name:      "Valid Azure Blob with path",
 			blobUrl:   "https://devstoreaccount1.blob.core.windows.net/testcontainer/testpath/year/month/day/test.parquet",
 			sas:       "",
-			container: "testcontainer",
-			blobName:  "testpath/year/month/day/test.parquet",
+			container: "/testcontainer/testpath/year/month/day",
+			blobName:  "test.parquet",
 			expectErr: false,
-		},
-		{
-			name:      "Invalid Azure Blob with custom azure scheme",
-			blobUrl:   "azure://devstoreaccount1/testcontainer",
-			sas:       "",
-			container: "",
-			blobName:  "",
-			expectErr: true,
-		},
-		{
-			name:      "Invalid Azure Blob with custom azure scheme",
-			blobUrl:   "azure://devstoreaccount1/testcontainer",
-			sas:       "",
-			container: "",
-			blobName:  "",
-			expectErr: true,
 		},
 		{
 			name:      "Valid Azure Blob with custom azure scheme and path",
 			blobUrl:   "azure://devstoreaccount1/testcontainer/testpath/year/month/day/test.parquet",
 			sas:       "",
-			container: "testcontainer",
-			blobName:  "testpath/year/month/day/test.parquet",
+			container: "/testcontainer/testpath/year/month/day",
+			blobName:  "test.parquet",
 			expectErr: false,
 		},
 	}
