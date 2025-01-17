@@ -18,6 +18,7 @@ import (
 type CSVDataWriter struct {
 	datastream *data.DataStream
 	writer     *csv.Writer
+	resource   io.WriteCloser
 	mux        *sync.Mutex
 }
 
@@ -147,7 +148,12 @@ func (cw *CSVDataWriter) Flush() error {
 }
 
 func (cw *CSVDataWriter) Close() error {
-	cw.Flush()
+	if err := cw.Flush(); err != nil {
+		return err
+	}
+	if err := cw.resource.Close(); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -156,7 +162,7 @@ func (cw *CSVDataWriter) CreateBatchWriter() data.BatchWriter {
 	return &CSVBatchWriter{dataWriter: cw, buffer: buffer}
 }
 
-func NewCSVDataWriter(datastream *data.DataStream, writer io.Writer) *CSVDataWriter {
+func NewCSVDataWriter(datastream *data.DataStream, writer io.WriteCloser) *CSVDataWriter {
 	w := csv.NewWriter(writer)
 	w.Comma = ','
 	if datastream == nil {
@@ -171,5 +177,5 @@ func NewCSVDataWriter(datastream *data.DataStream, writer io.Writer) *CSVDataWri
 		log.Fatalf("Failed to write header: %v", err)
 	}
 
-	return &CSVDataWriter{datastream: datastream, writer: w, mux: &sync.Mutex{}}
+	return &CSVDataWriter{datastream: datastream, writer: w, mux: &sync.Mutex{}, resource: writer}
 }

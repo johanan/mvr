@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/johanan/mvr/core"
 	"github.com/johanan/mvr/data"
@@ -76,10 +77,13 @@ params:
 		},
 	}
 	os.Setenv("TZ", "UTC")
+	loc := time.Local
+	time.Local = time.UTC
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create a buffer to write the CSV data to
 			var buf bytes.Buffer
+			writeCloser := NewWriteCloseBuffer(&buf)
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			zerolog.SetGlobalLevel(zerolog.Disabled)
@@ -95,14 +99,16 @@ params:
 			pgDs, _ := pgr.CreateDataStream(ctx, local_url, sc)
 			defer pgr.Close()
 
-			writer := NewCSVDataWriter(pgDs, &buf)
+			writer := NewCSVDataWriter(pgDs, writeCloser)
 
 			err = core.Execute(ctx, 1, sc, pgDs, pgr, writer)
 			assert.NoError(t, err)
+			writer.Close()
 
 			assert.Equal(t, tt.expected, buf.String())
 		})
 	}
+	time.Local = loc
 	os.Unsetenv("TZ")
 }
 
@@ -163,11 +169,11 @@ params:
 `,
 		},
 	}
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create a buffer to write the CSV data to
 			var buf bytes.Buffer
+			writeCloser := NewWriteCloseBuffer(&buf)
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			zerolog.SetGlobalLevel(zerolog.Disabled)
@@ -186,10 +192,11 @@ params:
 			assert.NoError(t, err)
 			defer msr.Close()
 
-			writer := NewCSVDataWriter(msDs, &buf)
+			writer := NewCSVDataWriter(msDs, writeCloser)
 
 			err = core.Execute(ctx, 1, sc, msDs, msr, writer)
 			assert.NoError(t, err)
+			writer.Close()
 
 			assert.Equal(t, tt.expected, buf.String())
 		})

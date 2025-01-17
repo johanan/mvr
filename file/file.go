@@ -3,6 +3,8 @@ package file
 import (
 	"bufio"
 	"compress/gzip"
+	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/url"
@@ -22,14 +24,10 @@ func NewProgressBar() *progressbar.ProgressBar {
 		progressbar.OptionSetWriter(os.Stderr),
 		progressbar.OptionShowBytes(true),
 		progressbar.OptionShowTotalBytes(true),
-		progressbar.OptionSetWidth(10),
+		progressbar.OptionSetWidth(1),
 		progressbar.OptionThrottle(1*time.Second),
 		progressbar.OptionShowCount(),
-		progressbar.OptionOnCompletion(func() {
-			fmt.Fprint(os.Stderr, "\n")
-		}),
 		progressbar.OptionSpinnerType(14),
-		progressbar.OptionFullWidth(),
 		progressbar.OptionSetRenderBlankState(false),
 		progressbar.OptionSetSpinnerChangeInterval(1*time.Second),
 	)
@@ -39,7 +37,7 @@ func BuildFullPath(parsed *url.URL, filename string) (*url.URL, error) {
 	switch parsed.Scheme {
 	case "stdout":
 		return parsed, nil
-	case "file":
+	default:
 		if filename == "" {
 			return nil, fmt.Errorf("filename in StreamConfig cannot be nil")
 		}
@@ -47,23 +45,82 @@ func BuildFullPath(parsed *url.URL, filename string) (*url.URL, error) {
 		if strings.TrimSpace(filename) == "" {
 			return nil, fmt.Errorf("filename in StreamConfig cannot be empty")
 		}
+		newURL := *parsed
 
-		filePath, err := url.JoinPath(parsed.Path, filename)
+		filePath, err := url.JoinPath(newURL.Path, filename)
 		if err != nil {
 			return nil, fmt.Errorf("error joining path: %s", err)
 		}
-		return &url.URL{Scheme: parsed.Scheme, Path: filePath}, nil
-	default:
-		return nil, fmt.Errorf("invalid scheme: %s", parsed.Scheme)
+		newURL.Path = filePath
+		return &newURL, nil
 	}
 }
 
-func GetIo(counting io.Writer, filePath *url.URL) (*bufio.Writer, error) {
-	var buf *bufio.Writer
+type BufferedWriter struct {
+	bufWriter *bufio.Writer
+	resources []io.WriteCloser
+	open      bool
+}
+
+func NewBufferedWriter(writer io.Writer, closers ...io.WriteCloser) *BufferedWriter {
+	return &BufferedWriter{
+		bufWriter: bufio.NewWriter(writer),
+		resources: closers,
+		open:      true,
+	}
+}
+
+func (b *BufferedWriter) Write(p []byte) (n int, err error) {
+	return b.bufWriter.Write(p)
+}
+
+func (b *BufferedWriter) Close() error {
+	var closeErr error
+	if b.open {
+		b.open = false
+
+		if err := b.bufWriter.Flush(); err != nil {
+			closeErr = err
+		}
+
+		for _, resource := range b.resources {
+			if err := resource.Close(); err != nil {
+				closeErr = errors.Join(closeErr, err)
+			}
+		}
+	}
+
+	return closeErr
+}
+
+func GetIo(ctx context.Context, counting io.WriteCloser, filePath *url.URL) (io.WriteCloser, error) {
+	var buf io.WriteCloser
 	switch filePath.Scheme {
 	case "stdout":
 		f := io.MultiWriter(os.Stdout, counting)
-		buf = bufio.NewWriter(f)
+		buf = NewBufferedWriter(f, os.Stdout, counting)
+	case "azurite":
+		blobConfig, err := ParseAzurite(filePath)
+		if err != nil {
+			return nil, fmt.Errorf("error parsing azurite url: %s", err)
+		}
+		azuriteBlob, err := blobConfig.GetWriter(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("error getting azurite writer: %s", err)
+		}
+		f := io.MultiWriter(azuriteBlob, counting)
+		buf = NewBufferedWriter(f, azuriteBlob)
+	case "azure", "https":
+		blobConfig, err := ParseAzureBlobURL(filePath)
+		if err != nil {
+			return nil, fmt.Errorf("error parsing azure blob url: %s", err)
+		}
+		azureBlob, err := blobConfig.GetWriter(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("error getting azure blob writer: %s", err)
+		}
+		f := io.MultiWriter(azureBlob, counting)
+		buf = NewBufferedWriter(f, azureBlob)
 	default:
 		if filePath == nil {
 			return nil, fmt.Errorf("filename in StreamConfig cannot be nil")
@@ -85,43 +142,39 @@ func GetIo(counting io.Writer, filePath *url.URL) (*bufio.Writer, error) {
 			return nil, fmt.Errorf("failed to open file %s: %v", filePath, err)
 		}
 		f := io.MultiWriter(file, counting)
-		buf = bufio.NewWriter(f)
+		buf = NewBufferedWriter(f, file, counting)
 	}
 	return buf, nil
 }
 
-func GetPathAndIO(parsed *url.URL, counter io.Writer, filename, compression, format string) (*url.URL, io.WriteCloser, error) {
-	path, err := BuildFullPath(parsed, filename)
-	if err != nil {
-		return nil, nil, err
-	}
+func GetPathAndIO(ctx context.Context, path *url.URL, counter io.WriteCloser, compression, format string) (io.WriteCloser, error) {
 
-	bufWriter, err := GetIo(counter, path)
+	bufWriter, err := GetIo(ctx, counter, path)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	compressedWriter, err := CreateCompressedWriter(bufWriter, compression, format)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
-	return path, compressedWriter, nil
+	return compressedWriter, nil
 }
 
-func AddCSV(ds *data.DataStream, writer io.Writer) *CSVDataWriter {
+func AddCSV(ds *data.DataStream, writer io.WriteCloser) *CSVDataWriter {
 	return NewCSVDataWriter(ds, writer)
 }
 
-func AddJSONL(ds *data.DataStream, writer io.Writer) *JSONLWriter {
+func AddJSONL(ds *data.DataStream, writer io.WriteCloser) *JSONLWriter {
 	return NewJSONLWriter(ds, writer)
 }
 
-func AddParquet(ds *data.DataStream, writer io.Writer) *ParquetDataWriter {
+func AddParquet(ds *data.DataStream, writer io.WriteCloser) *ParquetDataWriter {
 	return NewParquetDataWriter(ds, writer)
 }
 
-func AddFileWriter(format string, ds *data.DataStream, writer io.Writer) (data.DataWriter, error) {
+func AddFileWriter(format string, ds *data.DataStream, writer io.WriteCloser) (data.DataWriter, error) {
 	var dataWriter data.DataWriter
 	switch strings.ToLower(format) {
 	case "jsonl":
@@ -136,9 +189,9 @@ func AddFileWriter(format string, ds *data.DataStream, writer io.Writer) (data.D
 	return dataWriter, nil
 }
 
-func CreateCompressedWriter(bufWriter *bufio.Writer, compressionType string, format string) (io.WriteCloser, error) {
+func CreateCompressedWriter(bufWriter io.WriteCloser, compressionType string, format string) (io.WriteCloser, error) {
 	if format == "parquet" {
-		return nopWriteCloser{bufWriter}, nil
+		return bufWriter, nil
 	}
 
 	if compressionType == "gzip" {
@@ -146,12 +199,12 @@ func CreateCompressedWriter(bufWriter *bufio.Writer, compressionType string, for
 		return &gzipWriteCloser{gzipWriter: gzipWriter, bufferedWriter: bufWriter}, nil
 	}
 
-	return nopWriteCloser{bufWriter}, nil
+	return bufWriter, nil
 }
 
 type gzipWriteCloser struct {
 	gzipWriter     *gzip.Writer
-	bufferedWriter *bufio.Writer
+	bufferedWriter io.WriteCloser
 }
 
 func (w *gzipWriteCloser) Write(p []byte) (n int, err error) {
@@ -168,27 +221,9 @@ func (w *gzipWriteCloser) Close() error {
 		return err
 	}
 
-	if err := w.bufferedWriter.Flush(); err != nil {
+	if err := w.bufferedWriter.Close(); err != nil {
 		return err
 	}
 
-	return nil
-}
-
-type nopWriteCloser struct {
-	writer io.Writer
-}
-
-func (w nopWriteCloser) Write(p []byte) (n int, err error) {
-	return w.writer.Write(p)
-}
-
-func (w nopWriteCloser) Close() error {
-	// If the underlying writer is a buffered writer, flush it
-	if bufWriter, ok := w.writer.(*bufio.Writer); ok {
-		if err := bufWriter.Flush(); err != nil {
-			return err
-		}
-	}
 	return nil
 }

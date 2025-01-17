@@ -441,6 +441,7 @@ func Test_FullRoundTrip_ToPG(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create a buffer to write the CSV data to
 			var buf bytes.Buffer
+			writeCloser := NewWriteCloseBuffer(&buf)
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 
@@ -450,10 +451,11 @@ func Test_FullRoundTrip_ToPG(t *testing.T) {
 			pgDs, _ := pgr.CreateDataStream(ctx, local_url, tt.config)
 			defer pgr.Close()
 
-			writer := NewParquetDataWriter(pgDs, &buf)
+			writer := NewParquetDataWriter(pgDs, writeCloser)
 
 			err := core.Execute(ctx, 1, tt.config, pgDs, pgr, writer)
 			assert.NoError(t, err)
+			writer.Close()
 
 			reader, err := file.NewParquetReader(bytes.NewReader(buf.Bytes()), file.WithReadProps(parquet.NewReaderProperties(nil)))
 			assert.NoError(t, err)
@@ -474,6 +476,7 @@ func Test_FullRoundTrip_ToPG(t *testing.T) {
 
 func TestParquetWriter(t *testing.T) {
 	var buf bytes.Buffer
+	writeCloser := NewWriteCloseBuffer(&buf)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -489,7 +492,7 @@ func TestParquetWriter(t *testing.T) {
 		},
 	}
 
-	pdw := NewParquetDataWriter(ds, &buf)
+	pdw := NewParquetDataWriter(ds, writeCloser)
 
 	rows := [][]any{
 		{int64(1), "Alice"},

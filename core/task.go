@@ -69,17 +69,8 @@ func BuildDBReader(connURL *url.URL) (data.DBReaderConn, error) {
 
 func Execute(ctx context.Context, concurrency int, config *data.StreamConfig, datastream *data.DataStream, reader data.DBReaderConn, writer data.DataWriter) error {
 	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
 
-	defer writer.Close()
 	errCh := make(chan error, concurrency+1)
-
-	defer func() {
-		if err := writer.Flush(); err != nil {
-			log.Fatal().Msgf("Failed to flush writer: %v", err)
-		}
-		log.Trace().Msg("Flushed writer")
-	}()
 
 	var wg sync.WaitGroup
 
