@@ -51,6 +51,7 @@ func NewConfig(source, dest string, streamConfig *data.StreamConfig) *Config {
 func NewFlowResult(source *url.URL, stream *data.StreamConfig, start time.Time) *FlowResult {
 	cleaned := *source
 	cleaned.User = nil
+	cleaned.RawQuery = ""
 	result := &FlowResult{source: cleaned.String(), sql: stream.SQL, start: start}
 	return result
 }
@@ -58,6 +59,7 @@ func NewFlowResult(source *url.URL, stream *data.StreamConfig, start time.Time) 
 func (fr *FlowResult) SetPath(path *url.URL) *FlowResult {
 	cleaned := *path
 	cleaned.User = nil
+	cleaned.RawQuery = ""
 	fr.path = cleaned.String()
 	return fr
 }
