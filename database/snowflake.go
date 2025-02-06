@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"os"
 	"strings"
 
 	"github.com/johanan/mvr/data"
@@ -18,12 +19,24 @@ type SnowflakeDataReader struct {
 }
 
 func NewSnowflakeDataReader(connUrl *url.URL) (*SnowflakeDataReader, error) {
-	connString := connUrl.String()
 	scheme := connUrl.Scheme
 	if scheme != "snowflake" {
 		return nil, errors.New("only snowflake connections are supported")
 	}
 
+	privateKey := os.Getenv("MVR_PEM_KEY")
+	if privateKey != "" {
+		key, err := data.ParsePEMPrivateKey(privateKey)
+		if err != nil {
+			return nil, err
+		}
+		q := connUrl.Query()
+		q.Set("privateKey", data.GeneratePKCS8StringSupress(key))
+		q.Set("authenticator", "SNOWFLAKE_JWT")
+		connUrl.RawQuery = q.Encode()
+	}
+
+	connString := connUrl.String()
 	connString = strings.ReplaceAll(connString, "snowflake://", "")
 
 	db, err := sql.Open("snowflake", connString)
