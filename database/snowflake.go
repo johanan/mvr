@@ -25,7 +25,7 @@ func NewSnowflakeDataReader(connUrl *url.URL) (*SnowflakeDataReader, error) {
 	}
 
 	privateKey := os.Getenv("MVR_PEM_KEY")
-	if privateKey == "" {
+	if privateKey != "" {
 		key, err := data.ParsePEMPrivateKey(privateKey)
 		if err != nil {
 			return nil, err

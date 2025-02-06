@@ -10,13 +10,19 @@ import (
 
 func ParsePEMPrivateKey(pemKey string) (*rsa.PrivateKey, error) {
 	block, _ := pem.Decode([]byte(pemKey))
-	if block == nil || block.Type != "RSA PRIVATE KEY" {
+	if block == nil {
 		return nil, errors.New("failed to decode PEM block containing RSA private key")
 	}
 
-	privateKey, err := x509.ParsePKCS1PrivateKey(block.Bytes)
-	if err != nil {
-		return nil, err
+	var privateKey *rsa.PrivateKey
+
+	if block.Type == "RSA PRIVATE KEY" {
+		privateKey, _ = x509.ParsePKCS1PrivateKey(block.Bytes)
+	} else if block.Type == "PRIVATE KEY" {
+		privKey, _ := x509.ParsePKCS8PrivateKey(block.Bytes)
+		privateKey = privKey.(*rsa.PrivateKey)
+	} else {
+		return nil, errors.New("unsupported key type")
 	}
 
 	return privateKey, nil
