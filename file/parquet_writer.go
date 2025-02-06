@@ -171,13 +171,25 @@ func (pb *ParquetBatchWriter) WriteBatch(batch data.Batch) error {
 				if !ok {
 					return fmt.Errorf("type assertion failed for FLOAT4")
 				}
-				pb.columnBuffers[i] = append(buf, cast.ToFloat32(row[i]))
+				switch v := row[i].(type) {
+				case *big.Float:
+					f32, _ := v.Float32()
+					pb.columnBuffers[i] = append(buf, f32)
+				default:
+					pb.columnBuffers[i] = append(buf, cast.ToFloat32(row[i]))
+				}
 			case "FLOAT8":
 				buf, ok := pb.columnBuffers[i].([]float64)
 				if !ok {
 					return fmt.Errorf("type assertion failed for FLOAT8")
 				}
-				pb.columnBuffers[i] = append(buf, cast.ToFloat64(row[i]))
+				switch v := row[i].(type) {
+				case *big.Float:
+					f64, _ := v.Float64()
+					pb.columnBuffers[i] = append(buf, f64)
+				default:
+					pb.columnBuffers[i] = append(buf, cast.ToFloat64(row[i]))
+				}
 			case "JSONB", "JSON", "_TEXT":
 				buf, ok := pb.columnBuffers[i].([]string)
 				if !ok {
