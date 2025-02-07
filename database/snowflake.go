@@ -25,6 +25,16 @@ func NewSnowflakeDataReader(connUrl *url.URL) (*SnowflakeDataReader, error) {
 	}
 
 	privateKey := os.Getenv("MVR_PEM_KEY")
+	key_file := os.Getenv("MVR_PEM_FILE")
+
+	if privateKey == "" && key_file != "" {
+		fileBytes, err := os.ReadFile(key_file)
+		if err != nil {
+			return nil, err
+		}
+		privateKey = string(fileBytes)
+	}
+
 	if privateKey != "" {
 		key, err := data.ParsePEMPrivateKey(privateKey)
 		if err != nil {
@@ -166,6 +176,15 @@ func sfColumnsToPg(columns []Column) []Column {
 
 		case "ARRAY", "VARIANT":
 			pgCols[i].Type = "JSONB"
+		case "TEXT":
+			// this is the max size of a text field in snowflake
+			// anything under this will be a varchar
+			if col.Length < 16777216 {
+				pgCols[i].Type = "VARCHAR"
+			} else {
+				pgCols[i].Type = "TEXT"
+				col.Length = -1
+			}
 		}
 	}
 	return pgCols
