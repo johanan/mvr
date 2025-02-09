@@ -10,8 +10,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/apache/arrow/go/v18/parquet"
-	"github.com/apache/arrow/go/v18/parquet/file"
+	"github.com/apache/arrow-go/v18/parquet"
+	"github.com/apache/arrow-go/v18/parquet/file"
 	"github.com/johanan/mvr/core"
 	"github.com/johanan/mvr/data"
 	"github.com/johanan/mvr/database"
@@ -329,7 +329,7 @@ func GetRowGroupColumn[T parquetTypes](reader *file.Reader, colIndex int) ([]T, 
 	chunkMeta, _ := rgMeta.ColumnChunk(colIndex)
 	stats, _ := chunkMeta.Statistics()
 	numValues := stats.NumValues()
-	//numValues := chunkMeta.NumValues()
+	// numValues := chunkMeta.NumValues()
 
 	defLevels := make([]int16, numRows)
 	values := make([]T, numValues)
@@ -342,6 +342,14 @@ func GetRowGroupColumn[T parquetTypes](reader *file.Reader, colIndex int) ([]T, 
 		r, _ := column.(*file.Int64ColumnChunkReader)
 		int64Values := any(values).([]int64)
 		r.ReadBatch(numRows, int64Values, defLevels, nil)
+	case float32:
+		r, _ := column.(*file.Float32ColumnChunkReader)
+		float32Values := any(values).([]float32)
+		r.ReadBatch(numRows, float32Values, defLevels, nil)
+	case float64:
+		r, _ := column.(*file.Float64ColumnChunkReader)
+		float64Values := any(values).([]float64)
+		r.ReadBatch(numRows, float64Values, defLevels, nil)
 	case string:
 		r, _ := column.(*file.ByteArrayColumnChunkReader)
 		byteArrayValues := make([]parquet.ByteArray, numValues)
@@ -373,7 +381,7 @@ func testParquetColumn[T parquetTypes](t *testing.T, reader *file.Reader, colInd
 	assert.Equal(t, defExpected, defLevels)
 }
 
-func Test_FullRoundTrip_ToPG(t *testing.T) {
+func TestFullRoundTripToPG(t *testing.T) {
 	tests := []struct {
 		name        string
 		config      *data.StreamConfig
@@ -413,8 +421,10 @@ func Test_FullRoundTrip_ToPG(t *testing.T) {
 		{
 			name:   "Users Unique ID Test",
 			config: &data.StreamConfig{SQL: "SELECT unique_id FROM public.users", Format: "parquet"},
-			expected: [][]byte{{160, 238, 188, 153, 156, 11, 78, 248, 187, 109, 107, 185, 189, 56, 10, 17},
-				{160, 238, 188, 153, 156, 11, 78, 248, 187, 109, 107, 185, 189, 56, 10, 18}},
+			expected: [][]byte{
+				{160, 238, 188, 153, 156, 11, 78, 248, 187, 109, 107, 185, 189, 56, 10, 17},
+				{160, 238, 188, 153, 156, 11, 78, 248, 187, 109, 107, 185, 189, 56, 10, 18},
+			},
 			defExpected: []int16{1, 1},
 		},
 		{
@@ -434,6 +444,18 @@ func Test_FullRoundTrip_ToPG(t *testing.T) {
 			config:      &data.StreamConfig{SQL: "SELECT unique_id FROM public.users", Format: "parquet", Columns: []data.Column{{Name: "unique_id", Type: "TEXT"}}},
 			expected:    []string{"a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11", "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a12"},
 			defExpected: []int16{1, 1},
+		},
+		{
+			name:        "Decimal to Double Test",
+			config:      &data.StreamConfig{SQL: "SELECT decimal_value FROM public.numbers LIMIT 1", Format: "parquet", Columns: []data.Column{{Name: "decimal_value", Type: "DOUBLE"}}},
+			expected:    []float64{1},
+			defExpected: []int16{1},
+		},
+		{
+			name:        "Decimal to Int Test",
+			config:      &data.StreamConfig{SQL: "SELECT decimal_value FROM public.numbers LIMIT 1", Format: "parquet", Columns: []data.Column{{Name: "decimal_value", Type: "INT8"}}},
+			expected:    []int64{1},
+			defExpected: []int16{1},
 		},
 	}
 	os.Setenv("TZ", "UTC")
@@ -464,6 +486,10 @@ func Test_FullRoundTrip_ToPG(t *testing.T) {
 				testParquetColumn(t, reader, 0, expected, tt.defExpected)
 			case []int64:
 				testParquetColumn(t, reader, 0, expected, tt.defExpected)
+			case []float32:
+				testParquetColumn(t, reader, 0, expected, tt.defExpected)
+			case []float64:
+				testParquetColumn(t, reader, 0, expected, tt.defExpected)
 			case []string:
 				testParquetColumn(t, reader, 0, expected, tt.defExpected)
 			case [][]byte:
@@ -487,7 +513,7 @@ func TestParquetWriter(t *testing.T) {
 		BatchSize: 10,
 		Mux:       sync.Mutex{},
 		DestColumns: []data.Column{
-			{Name: "id", Type: "INT8"},
+			{Name: "id", Type: "BIGINT"},
 			{Name: "name", Type: "TEXT"},
 		},
 	}
@@ -534,5 +560,4 @@ func TestParquetWriter(t *testing.T) {
 	assert.NotNil(t, metadata)
 	assert.Equal(t, 2, metadata.Schema.NumColumns())
 	assert.Equal(t, 5, metadata.FileMetaData.NumRows)
-
 }

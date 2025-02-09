@@ -11,10 +11,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/apache/arrow/go/v18/parquet"
-	"github.com/apache/arrow/go/v18/parquet/compress"
-	"github.com/apache/arrow/go/v18/parquet/file"
-	"github.com/apache/arrow/go/v18/parquet/schema"
+	"github.com/apache/arrow-go/v18/parquet"
+	"github.com/apache/arrow-go/v18/parquet/compress"
+	"github.com/apache/arrow-go/v18/parquet/file"
+	"github.com/apache/arrow-go/v18/parquet/schema"
 	"github.com/google/uuid"
 	"github.com/johanan/mvr/data"
 
@@ -67,12 +67,12 @@ type MappedType struct {
 
 // Numeric is it's own lookup
 var parquetTypeMap = map[string]MappedType{
-	"BOOL":        {parquet.Types.Boolean, nil, reflect.TypeOf(bool(false))},
-	"INT2":        {parquet.Types.Int32, nil, reflect.TypeOf(int32(0))},
-	"INT4":        {parquet.Types.Int32, nil, reflect.TypeOf(int32(0))},
-	"INT8":        {parquet.Types.Int64, nil, reflect.TypeOf(int64(0))},
-	"FLOAT4":      {parquet.Types.Float, nil, reflect.TypeOf(float32(0))},
-	"FLOAT8":      {parquet.Types.Double, nil, reflect.TypeOf(float64(0))},
+	"BOOLEAN":     {parquet.Types.Boolean, nil, reflect.TypeOf(bool(false))},
+	"SMALLINT":    {parquet.Types.Int32, nil, reflect.TypeOf(int32(0))},
+	"INTEGER":     {parquet.Types.Int32, nil, reflect.TypeOf(int32(0))},
+	"BIGINT":      {parquet.Types.Int64, nil, reflect.TypeOf(int64(0))},
+	"REAL":        {parquet.Types.Float, nil, reflect.TypeOf(float32(0))},
+	"DOUBLE":      {parquet.Types.Double, nil, reflect.TypeOf(float64(0))},
 	"UUID":        {parquet.Types.FixedLenByteArray, schema.UUIDLogicalType{}, reflect.TypeOf([]byte{})},
 	"DATE":        {parquet.Types.Int32, schema.DateLogicalType{}, reflect.TypeOf(int32(0))},
 	"TIMESTAMP":   {parquet.Types.Int64, schema.NewTimestampLogicalType(false, schema.TimeUnitNanos), reflect.TypeOf(int64(0))},
@@ -95,10 +95,11 @@ func numericLookup(precision int, scale int) MappedType {
 }
 
 func checkType(col data.Column) MappedType {
-	if col.Type == "NUMERIC" {
+	aliased := data.TypeAlias(col.Type)
+	if aliased == "NUMERIC" {
 		return numericLookup(int(col.Precision), int(col.Scale))
 	}
-	if t, ok := parquetTypeMap[col.Type]; ok {
+	if t, ok := parquetTypeMap[aliased]; ok {
 		return t
 	}
 	return MappedType{parquet.Types.ByteArray, schema.StringLogicalType{}, reflect.TypeOf(string(""))}
@@ -168,7 +169,7 @@ func (pb *ParquetBatchWriter) WriteBatch(batch data.Batch) error {
 			pb.definitionLevels[i] = append(pb.definitionLevels[i], 1)
 
 			switch col.Type {
-			case "INT2", "SMALLINT":
+			case "SMALLINT":
 				buf, ok := pb.columnBuffers[i].([]int32)
 				if !ok {
 					return fmt.Errorf("type assertion failed for INT2")
@@ -179,7 +180,7 @@ func (pb *ParquetBatchWriter) WriteBatch(batch data.Batch) error {
 				default:
 					pb.columnBuffers[i] = append(buf, cast.ToInt32(row[i]))
 				}
-			case "INT4", "INTEGER", "INT":
+			case "INTEGER":
 				buf, ok := pb.columnBuffers[i].([]int32)
 				if !ok {
 					return fmt.Errorf("type assertion failed for INT4")
@@ -192,7 +193,7 @@ func (pb *ParquetBatchWriter) WriteBatch(batch data.Batch) error {
 				default:
 					pb.columnBuffers[i] = append(buf, cast.ToInt32(row[i]))
 				}
-			case "INT8", "BIGINT":
+			case "BIGINT":
 				buf, ok := pb.columnBuffers[i].([]int64)
 				if !ok {
 					return fmt.Errorf("type assertion failed for INT8")
@@ -204,10 +205,12 @@ func (pb *ParquetBatchWriter) WriteBatch(batch data.Batch) error {
 					pb.columnBuffers[i] = append(buf, int64(v))
 				case int64:
 					pb.columnBuffers[i] = append(buf, v)
+				case decimal.Decimal:
+					pb.columnBuffers[i] = append(buf, v.IntPart())
 				default:
 					pb.columnBuffers[i] = append(buf, cast.ToInt64(row[i]))
 				}
-			case "FLOAT4", "REAL":
+			case "REAL":
 				buf, ok := pb.columnBuffers[i].([]float32)
 				if !ok {
 					return fmt.Errorf("type assertion failed for FLOAT4")
@@ -219,13 +222,16 @@ func (pb *ParquetBatchWriter) WriteBatch(batch data.Batch) error {
 				default:
 					pb.columnBuffers[i] = append(buf, cast.ToFloat32(row[i]))
 				}
-			case "FLOAT8", "DOUBLE PRECISION", "DOUBLE":
+			case "DOUBLE":
 				buf, ok := pb.columnBuffers[i].([]float64)
 				if !ok {
 					return fmt.Errorf("type assertion failed for FLOAT8")
 				}
 				switch v := row[i].(type) {
 				case *big.Float:
+					f64, _ := v.Float64()
+					pb.columnBuffers[i] = append(buf, f64)
+				case decimal.Decimal:
 					f64, _ := v.Float64()
 					pb.columnBuffers[i] = append(buf, f64)
 				default:
@@ -261,7 +267,7 @@ func (pb *ParquetBatchWriter) WriteBatch(batch data.Batch) error {
 				default:
 					return fmt.Errorf("expected string or UUID for UUID column %s, got %T", col.Name, v)
 				}
-			case "NUMERIC", "DECIMAL":
+			case "NUMERIC":
 				decimalValue, err := convertToParquetDecimal(row[i], int(col.Precision), int(col.Scale), pb.scaleFactors)
 				if err != nil {
 					return fmt.Errorf("failed to convert DECIMAL for column %s: %v", col.Name, err)
@@ -300,7 +306,7 @@ func (pb *ParquetBatchWriter) WriteBatch(batch data.Batch) error {
 				// Convert the date to the number of days since the Unix epoch
 				daysSinceEpoch := int32(dateValue.Sub(epochDate).Truncate(24*time.Hour).Hours() / 24)
 				pb.columnBuffers[i] = append(buf, daysSinceEpoch)
-			case "BOOL":
+			case "BOOLEAN":
 				buf, ok := pb.columnBuffers[i].([]bool)
 				if !ok {
 					return fmt.Errorf("type assertion failed for BOOL")
