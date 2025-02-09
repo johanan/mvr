@@ -11,10 +11,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/apache/arrow/go/v18/parquet"
-	"github.com/apache/arrow/go/v18/parquet/compress"
-	"github.com/apache/arrow/go/v18/parquet/file"
-	"github.com/apache/arrow/go/v18/parquet/schema"
+	"github.com/apache/arrow-go/v18/parquet"
+	"github.com/apache/arrow-go/v18/parquet/compress"
+	"github.com/apache/arrow-go/v18/parquet/file"
+	"github.com/apache/arrow-go/v18/parquet/schema"
 	"github.com/google/uuid"
 	"github.com/johanan/mvr/data"
 

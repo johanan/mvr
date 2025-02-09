@@ -10,8 +10,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/apache/arrow/go/v18/parquet"
-	"github.com/apache/arrow/go/v18/parquet/file"
+	"github.com/apache/arrow-go/v18/parquet"
+	"github.com/apache/arrow-go/v18/parquet/file"
 	"github.com/johanan/mvr/core"
 	"github.com/johanan/mvr/data"
 	"github.com/johanan/mvr/database"
