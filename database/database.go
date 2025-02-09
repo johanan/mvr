@@ -9,9 +9,11 @@ import (
 	"github.com/spf13/cast"
 )
 
-type Column = data.Column
-type Batch = data.Batch
-type DataStream = data.DataStream
+type (
+	Column     = data.Column
+	Batch      = data.Batch
+	DataStream = data.DataStream
+)
 
 func logColumns(cols, destCols []Column) {
 	jsonColumns, err := json.Marshal(cols)

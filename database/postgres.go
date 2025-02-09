@@ -76,7 +76,9 @@ func (pool *PGDataReader) CreateDataStream(ctx context.Context, connUrl *url.URL
 
 	columns := MapToMvrColumns(dbCols)
 	for i, col := range columns {
-		columns[i].Type = col.DatabaseType
+		// pgx returns the alias and not the "official" type
+		// https://www.postgresql.org/docs/current/datatype.html#DATATYPE-TABLE
+		columns[i].Type = data.TypeAlias(col.DatabaseType)
 	}
 	destColumns := make([]data.Column, len(columns))
 	copy(destColumns, columns)

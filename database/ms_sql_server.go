@@ -141,21 +141,15 @@ func msColumnsToPg(columns []Column) []Column {
 		pgCols[i].Type = col.DatabaseType
 		switch col.DatabaseType {
 		case "BIT":
-			pgCols[i].Type = "BOOL"
+			pgCols[i].Type = "BOOLEAN"
 		case "DECIMAL":
 			pgCols[i].Type = "NUMERIC"
 			pgCols[i].Precision = col.Precision
 			pgCols[i].Scale = col.Scale
-		case "SMALLINT":
-			pgCols[i].Type = "INT2"
 		case "INT":
-			pgCols[i].Type = "INT4"
-		case "BIGINT":
-			pgCols[i].Type = "INT8"
-		case "REAL":
-			pgCols[i].Type = "FLOAT4"
+			pgCols[i].Type = "INTEGER"
 		case "FLOAT":
-			pgCols[i].Type = "FLOAT8"
+			pgCols[i].Type = "DOUBLE"
 		case "DATETIMEOFFSET":
 			pgCols[i].Type = "TIMESTAMPTZ"
 		case "DATETIME":

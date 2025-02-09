@@ -325,6 +325,31 @@ func (ds *DataStream) BatchesToWriter(ctx context.Context, writer BatchWriter) e
 	return nil
 }
 
+// TypeAlias corrects for the various ways that Postgres types are named
+// the goal is to only have the name column from this table https://www.postgresql.org/docs/current/datatype.html#DATATYPE-TABLE
+func TypeAlias(columnType string) string {
+	switch columnType {
+	case "INT2":
+		return "SMALLINT"
+	case "INT4", "INT":
+		return "INTEGER"
+	case "INT8":
+		return "BIGINT"
+	case "DECIMAL":
+		return "NUMERIC"
+	case "FLOAT4":
+		return "REAL"
+	case "FLOAT8", "DOUBLE PRECISION":
+		return "DOUBLE"
+	case "CHARCTER VARYING":
+		return "VARCHAR"
+	case "BOOL":
+		return "BOOLEAN"
+	default:
+		return columnType
+	}
+}
+
 func OverrideColumns(original []Column, overrides []Column) []Column {
 	overrideMap := make(map[string]Column)
 	for _, col := range overrides {
@@ -334,7 +359,7 @@ func OverrideColumns(original []Column, overrides []Column) []Column {
 	for i, col := range original {
 		if overrideCol, found := overrideMap[strings.ToLower(col.Name)]; found {
 			if overrideCol.Type != "" {
-				original[i].Type = strings.ToUpper(overrideCol.Type)
+				original[i].Type = TypeAlias(strings.ToUpper(overrideCol.Type))
 			}
 			if overrideCol.Length != 0 {
 				original[i].Length = overrideCol.Length
