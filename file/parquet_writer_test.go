@@ -457,6 +457,18 @@ func TestFullRoundTripToPG(t *testing.T) {
 			expected:    []int64{1},
 			defExpected: []int16{1},
 		},
+		{
+			name:        "JSONB Test",
+			config:      &data.StreamConfig{SQL: "SELECT json_value FROM public.strings", Format: "parquet"},
+			expected:    []string{"{}", "{\"key\":\"value\"}"},
+			defExpected: []int16{1, 1},
+		},
+		{
+			name:        "JSONB to string Test",
+			config:      &data.StreamConfig{SQL: "SELECT json_value::TEXT as json_value FROM public.strings", Format: "parquet", Columns: []data.Column{{Name: "json_value", Type: "JSONB"}}},
+			expected:    []string{"{}", "{\"key\": \"value\"}"},
+			defExpected: []int16{1, 1},
+		},
 	}
 	os.Setenv("TZ", "UTC")
 	for _, tt := range tests {

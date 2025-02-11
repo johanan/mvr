@@ -242,11 +242,16 @@ func (pb *ParquetBatchWriter) WriteBatch(batch data.Batch) error {
 				if !ok {
 					return fmt.Errorf("type assertion failed for JSON types")
 				}
-				j, err := json.Marshal(row[i])
-				if err != nil {
-					return fmt.Errorf("failed to marshal JSON for column %s: %v", col.Name, err)
+				switch v := row[i].(type) {
+				case string:
+					pb.columnBuffers[i] = append(buf, v)
+				default:
+					j, err := json.Marshal(row[i])
+					if err != nil {
+						return fmt.Errorf("failed to marshal JSON for column %s: %v", col.Name, err)
+					}
+					pb.columnBuffers[i] = append(buf, string(j))
 				}
-				pb.columnBuffers[i] = append(buf, string(j))
 			case "UUID":
 				buf, ok := pb.columnBuffers[i].([][]byte)
 				if !ok {
