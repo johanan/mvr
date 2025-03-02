@@ -409,13 +409,13 @@ func TestFullRoundTripToPG(t *testing.T) {
 		{
 			name:        "Users Created Test",
 			config:      &data.StreamConfig{SQL: "SELECT created FROM public.users", Format: "parquet"},
-			expected:    []int64{1728408120000000000, 1728408120000000000},
+			expected:    []int64{1728408120000000, 1728408120000000},
 			defExpected: []int16{1, 1},
 		},
 		{
 			name:        "Users CreatedZ Test",
 			config:      &data.StreamConfig{SQL: "SELECT createdz FROM public.users", Format: "parquet"},
-			expected:    []int64{1728408120000000000, 1728408120000000000},
+			expected:    []int64{1728408120000000, 1728408120000000},
 			defExpected: []int16{1, 1},
 		},
 		{

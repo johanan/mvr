@@ -14,5 +14,7 @@ tables:
       SELECT * FROM public.numbers LIMIT 1000
   - stream_name: public.strings
     columns:
+      - name: "json_value"
+        type: "JSONB"
       - name: "array_value"
         type: "JSONB"

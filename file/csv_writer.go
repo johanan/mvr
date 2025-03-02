@@ -53,13 +53,13 @@ func ValueToString(value any, col data.Column) (string, error) {
 	switch col.Type {
 	case "TIMESTAMP":
 		if t, ok := value.(time.Time); ok {
-			return t.Format(data.RFC3339NanoNoTZ), nil
+			return t.Format(data.RFC3339MicroNoTZ), nil
 		} else {
 			return cast.ToString(value), nil
 		}
 	case "TIMESTAMPTZ":
 		if t, ok := value.(time.Time); ok {
-			return t.Format(time.RFC3339Nano), nil
+			return t.Format(data.RFC3339MicroTZ), nil
 		} else {
 			return cast.ToString(value), nil
 		}

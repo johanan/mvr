@@ -75,8 +75,8 @@ var parquetTypeMap = map[string]MappedType{
 	"DOUBLE":      {parquet.Types.Double, nil, reflect.TypeOf(float64(0))},
 	"UUID":        {parquet.Types.FixedLenByteArray, schema.UUIDLogicalType{}, reflect.TypeOf([]byte{})},
 	"DATE":        {parquet.Types.Int32, schema.DateLogicalType{}, reflect.TypeOf(int32(0))},
-	"TIMESTAMP":   {parquet.Types.Int64, schema.NewTimestampLogicalType(false, schema.TimeUnitNanos), reflect.TypeOf(int64(0))},
-	"TIMESTAMPTZ": {parquet.Types.Int64, schema.NewTimestampLogicalType(true, schema.TimeUnitNanos), reflect.TypeOf(int64(0))},
+	"TIMESTAMP":   {parquet.Types.Int64, schema.NewTimestampLogicalType(false, schema.TimeUnitMicros), reflect.TypeOf(int64(0))},
+	"TIMESTAMPTZ": {parquet.Types.Int64, schema.NewTimestampLogicalType(true, schema.TimeUnitMicros), reflect.TypeOf(int64(0))},
 	"VARCHAR":     {parquet.Types.ByteArray, schema.StringLogicalType{}, reflect.TypeOf(string(""))},
 	"JSONB":       {parquet.Types.ByteArray, schema.JSONLogicalType{}, reflect.TypeOf(string(""))},
 	"JSON":        {parquet.Types.ByteArray, schema.JSONLogicalType{}, reflect.TypeOf(string(""))},
@@ -331,7 +331,7 @@ func (pb *ParquetBatchWriter) WriteBatch(batch data.Batch) error {
 				if !ok {
 					return fmt.Errorf("expected time.Time for TIMESTAMP column %s, got %T", col.Name, row[i])
 				}
-				pb.columnBuffers[i] = append(buf, v.UnixNano())
+				pb.columnBuffers[i] = append(buf, v.UnixMicro())
 			case "TEXT", "VARCHAR":
 				buf, ok := pb.columnBuffers[i].([]string)
 				if !ok {
