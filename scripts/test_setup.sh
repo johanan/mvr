@@ -126,3 +126,4 @@ docker exec sqlserver_test /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "
 INSERT INTO dbo.strings (char_value, varchar_value, text_value, json_value, jsonb_value, array_value) VALUES 
 ('a', 'a', 'a', '{}', '{}', '[]'), 
 ('b', 'b', 'b', '{\"key\": \"value\"}', '{\"key\": \"value\"}', '[\"a\"]');"
+
