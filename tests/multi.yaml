@@ -1,17 +1,10 @@
-format: parquet
+format: arrow
 filename: "{{ YYYY }}/{{stream_name}}{{ext}}"
 compression: snappy
 
 tables:
   - stream_name: public.users
-    columns:
-      - name: "unique_id"
-        type: "TEXT"
   - stream_name: public.numbers
-    format: jsonl
-    compression: gzip
-    sql: |
-      SELECT * FROM public.numbers LIMIT 1000
   - stream_name: public.strings
     columns:
       - name: "json_value"

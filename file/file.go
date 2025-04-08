@@ -183,6 +183,8 @@ func AddFileWriter(format string, ds *data.DataStream, writer io.WriteCloser) (d
 		dataWriter = AddCSV(ds, writer)
 	case "parquet":
 		dataWriter = AddParquet(ds, writer)
+	case "arrow":
+		dataWriter = NewArrowDataWriter(ds, writer)
 	default:
 		return nil, fmt.Errorf("unsupported format: %s", format)
 	}
