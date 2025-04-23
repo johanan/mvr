@@ -158,6 +158,8 @@ func ParseAndExecuteTemplate(data []byte, config *StreamConfig) ([]byte, error) 
 func ext(config *StreamConfig) string {
 	var ext string
 	switch strings.ToLower(config.Format) {
+	case "arrow":
+		ext = ".arrow"
 	case "csv":
 		ext = ".csv"
 	case "jsonl":

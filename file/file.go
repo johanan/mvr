@@ -13,6 +13,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/apache/arrow-go/v18/arrow"
+	"github.com/apache/arrow-go/v18/arrow/array"
+	"github.com/apache/arrow-go/v18/arrow/ipc"
+	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/johanan/mvr/data"
 	"github.com/schollz/progressbar/v3"
 )
@@ -228,4 +232,26 @@ func (w *gzipWriteCloser) Close() error {
 	}
 
 	return nil
+}
+
+func WriteEmptyFile(format string, writer io.Writer) error {
+	switch format {
+	case "arrow":
+		// Create a minimal valid Arrow file with no records
+		schema := arrow.NewSchema([]arrow.Field{}, nil)
+		alloc := memory.NewGoAllocator()
+		arrowWriter := ipc.NewWriter(writer, ipc.WithSchema(schema), ipc.WithAllocator(alloc))
+
+		recordBuilder := array.NewRecordBuilder(alloc, schema)
+		emptyBatch := recordBuilder.NewRecord()
+		defer recordBuilder.Release()
+		if err := arrowWriter.Write(emptyBatch); err != nil {
+			return err
+		}
+		return arrowWriter.Close()
+
+	default:
+		// For unknown formats, write nothing but don't error
+		return nil
+	}
 }

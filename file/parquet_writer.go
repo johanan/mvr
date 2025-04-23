@@ -25,9 +25,9 @@ import (
 var epochDate = time.Date(1970, 1, 1, 0, 0, 0, 0, time.UTC)
 
 type ColumnMetadata struct {
-	Name string `json:"name"`
-	Type string `json:"type"`
-	Len  int32  `json:"len"`
+	Name   string `json:"name"`
+	Type   string `json:"type"`
+	Length int32  `json:"length"`
 }
 
 type ParquetDataWriter struct {
@@ -108,7 +108,7 @@ func checkType(col data.Column) MappedType {
 func mapColumnMetadata(columns []data.Column) []ColumnMetadata {
 	columnMetadata := make([]ColumnMetadata, len(columns))
 	for col := range columns {
-		columnMetadata[col] = ColumnMetadata{Name: columns[col].Name, Type: columns[col].Type, Len: int32(columns[col].Length)}
+		columnMetadata[col] = ColumnMetadata{Name: columns[col].Name, Type: columns[col].Type, Length: int32(columns[col].Length)}
 	}
 
 	return columnMetadata
