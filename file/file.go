@@ -245,6 +245,7 @@ func WriteEmptyFile(format string, writer io.Writer) error {
 		recordBuilder := array.NewRecordBuilder(alloc, schema)
 		emptyBatch := recordBuilder.NewRecord()
 		defer recordBuilder.Release()
+		defer emptyBatch.Release()
 		if err := arrowWriter.Write(emptyBatch); err != nil {
 			return err
 		}
