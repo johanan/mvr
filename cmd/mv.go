@@ -3,6 +3,7 @@ package cmd
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"runtime"
 	"time"
@@ -65,6 +66,7 @@ var mvCmd = &cobra.Command{
 			SQL:         mvSql,
 			Compression: mvCompression,
 			StreamName:  mvName,
+			BatchSize:   mvBatchSize,
 		}
 
 		sConfig, err := d.BuildConfig(templateData, cliArgs)
@@ -98,12 +100,6 @@ var mvCmd = &cobra.Command{
 			zerolog.SetGlobalLevel(zerolog.Disabled)
 		}
 
-		reader, err := core.BuildDBReader(config.SourceConn.ParsedUrl)
-		if err != nil {
-			return err
-		}
-		defer reader.Close()
-
 		// add progress bar
 		var bar *progressbar.ProgressBar
 		if quiet || silent {
@@ -118,6 +114,46 @@ var mvCmd = &cobra.Command{
 		}
 
 		result := core.NewFlowResult(config.SourceConn.ParsedUrl, sConfig, time.Now()).SetPath(path)
+		isStdout := config.DestConn.ParsedUrl.Scheme == "stdout"
+
+		cleanup := func(executionErr error, writer io.WriteCloser, fileWriter d.DataWriter) error {
+			if executionErr != nil && isStdout && writer != nil {
+				log.Debug().Msg("Writing empty file to stdout due to error")
+				if emptyErr := file.WriteEmptyFile(sConfig.Format, writer); emptyErr != nil {
+					log.Debug().Err(emptyErr).Msg("Failed to write empty file")
+				}
+			}
+
+			var closeErr error
+
+			// Close fileWriter if it was created
+			if fileWriter != nil {
+				if err := fileWriter.Flush(); err != nil {
+					closeErr = errors.Join(closeErr, fmt.Errorf("flush writer: %w", err))
+				}
+				if err := fileWriter.Close(); err != nil {
+					closeErr = errors.Join(closeErr, fmt.Errorf("close writer: %w", err))
+				}
+			}
+
+			// Close writer if it was created
+			if writer != nil {
+				if err := writer.Close(); err != nil {
+					closeErr = errors.Join(closeErr, fmt.Errorf("close writer: %w", err))
+				}
+			}
+
+			if closeErr != nil {
+				return closeErr
+			}
+			log.Trace().Msg("Flushed writer")
+
+			if executionErr != nil {
+				return executionErr
+			}
+
+			return nil
+		}
 
 		writer, err := file.GetPathAndIO(ctx, path, bar, sConfig.Compression, sConfig.Format)
 		if err != nil {
@@ -127,41 +163,36 @@ var mvCmd = &cobra.Command{
 		}
 		log.Info().Msgf("Writing to %s", path)
 
+		reader, err := core.BuildDBReader(config.SourceConn.ParsedUrl)
+		if err != nil {
+			return cleanup(err, writer, nil)
+		}
+		defer reader.Close()
+
 		// create datastream
 		datastream, err := reader.CreateDataStream(ctx, config.SourceConn.ParsedUrl, config.StreamConfig)
 		if err != nil {
 			result.Error(err.Error()).LogContext(log.Error()).Send()
-			return err
+			return cleanup(err, writer, nil)
 		}
 
 		fileWriter, err := file.AddFileWriter(sConfig.Format, datastream, writer)
 		if err != nil {
 			result.Error(err.Error()).LogContext(log.Error()).Send()
-			return err
+			return cleanup(err, writer, nil)
 		}
 
 		err = core.Execute(ctx, concurrency, sConfig, datastream, reader, fileWriter)
 		if err != nil {
 			result.Error(err.Error()).LogContext(log.Error()).Send()
-			return err
+			return cleanup(err, writer, fileWriter)
 		}
 
-		var acc error
-		if err := fileWriter.Flush(); err != nil {
-			acc = errors.Join(acc, fmt.Errorf("flush writer: %w", err))
-		}
-		if err := fileWriter.Close(); err != nil {
-			acc = errors.Join(acc, fmt.Errorf("close writer: %w", err))
-		}
-		if err := writer.Close(); err != nil {
-			acc = errors.Join(acc, fmt.Errorf("close writer: %w", err))
-		}
-
+		acc := cleanup(nil, writer, fileWriter)
 		if acc != nil {
 			result.Error(acc.Error()).LogContext(log.Error()).Send()
 			return acc
 		}
-		log.Trace().Msg("Flushed writer")
 
 		result.SetRows(datastream.TotalRows).SetBytes(bar.State().CurrentBytes).Success()
 		result.LogContext(log.Info()).Msg("Finished writing data")

@@ -40,10 +40,9 @@ func NewArrowDataWriter(datastream *data.DataStream, w io.Writer) *ArrowDataWrit
 	for i, col := range datastream.DestColumns {
 		// Add column metadata to preserve type information
 		metadata := arrow.NewMetadata(
-			[]string{"original_type", "precision", "scale", "length"},
-			[]string{col.Type,
-				cast.ToString(col.Precision),
-				cast.ToString(col.Scale),
+			[]string{"name", "type", "length"},
+			[]string{col.Name,
+				col.Type,
 				cast.ToString(col.Length)},
 		)
 
