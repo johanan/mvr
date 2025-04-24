@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -15,6 +16,7 @@ import (
 	"github.com/rs/zerolog/log"
 	"github.com/schollz/progressbar/v3"
 	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v2"
 )
 
 var mvCfgFile string
@@ -24,6 +26,25 @@ var mvSql string
 var mvCompression string
 var mvName string
 var mvBatchSize int
+var mvColumns string
+
+func parseColumns(data []byte) ([]d.Column, error) {
+	// Try JSON first
+	var config []d.Column
+	jsonErr := json.Unmarshal(data, &config)
+	if jsonErr == nil {
+		return config, nil
+	}
+
+	// If JSON failed, try YAML
+	yamlErr := yaml.Unmarshal(data, &config)
+	if yamlErr == nil {
+		return config, nil
+	}
+
+	// Both formats failed - return both errors for better debugging
+	return nil, fmt.Errorf("failed to parse as JSON (%v) or YAML (%v)", jsonErr, yamlErr)
+}
 
 var mvCmd = &cobra.Command{
 	Use:   "mv",
@@ -60,6 +81,15 @@ var mvCmd = &cobra.Command{
 		} else {
 			templateData = []byte("")
 		}
+
+		var columns []d.Column
+		if mvColumns != "" {
+			columns, err = parseColumns([]byte(mvColumns))
+			if err != nil {
+				return fmt.Errorf("error parsing columns: %v", err)
+			}
+		}
+
 		cliArgs := &d.StreamConfig{
 			Format:      mvFormat,
 			Filename:    mvFilename,
@@ -67,6 +97,7 @@ var mvCmd = &cobra.Command{
 			Compression: mvCompression,
 			StreamName:  mvName,
 			BatchSize:   mvBatchSize,
+			Columns:     columns,
 		}
 
 		sConfig, err := d.BuildConfig(templateData, cliArgs)
@@ -208,5 +239,6 @@ func init() {
 	mvCmd.Flags().StringVar(&mvSql, "sql", "", "sql query to run")
 	mvCmd.Flags().StringVar(&mvCompression, "compression", "", "compression type")
 	mvCmd.Flags().StringVar(&mvName, "name", "", "stream name")
+	mvCmd.Flags().StringVar(&mvColumns, "columns", "", "columns to include")
 	mvCmd.Flags().IntVar(&mvBatchSize, "batch-size", 0, "batch size")
 }
