@@ -145,3 +145,12 @@ func (pool *PGDataReader) ExecuteDataStream(ctx context.Context, ds *DataStream,
 
 	return nil
 }
+
+func (pool *PGDataReader) ExecuteCommand(ctx context.Context, sqlCommand string) (string, error) {
+	commandTag, err := pool.Pool.Exec(ctx, sqlCommand)
+	if err != nil {
+		return "", fmt.Errorf("failed to execute command: %w", err)
+	}
+
+	return commandTag.String(), nil
+}

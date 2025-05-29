@@ -158,6 +158,19 @@ func (sf *SnowflakeDataReader) ExecuteDataStream(ctx context.Context, ds *DataSt
 	return nil
 }
 
+func (sf *SnowflakeDataReader) ExecuteCommand(ctx context.Context, sql_command string) (string, error) {
+	db := sf.Snowflake
+	stmt, err := db.PrepareContext(gosnowflake.WithHigherPrecision(ctx), sql_command)
+	if err != nil {
+		return "", fmt.Errorf("failed to prepare command: %w", err)
+	}
+	defer stmt.Close()
+	var status string
+	err = stmt.QueryRowContext(ctx, nil).Scan(&status)
+
+	return status, nil
+}
+
 func sfColumnsToPg(columns []Column) []Column {
 	pgCols := make([]Column, len(columns))
 	copy(pgCols, columns)

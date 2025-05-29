@@ -46,6 +46,25 @@ func SetupConfig(sConfig *data.StreamConfig) (*Config, error) {
 	return config, nil
 }
 
+func BuildDbExec(connURL *url.URL) (data.DBExec, error) {
+	source := connURL.Scheme
+	var exec data.DBExec
+	var err error
+
+	switch source {
+	case "postgres":
+		exec, err = database.NewPGDataReader(connURL)
+	case "snowflake":
+		exec, err = database.NewSnowflakeDataReader(connURL)
+	default:
+		log.Fatal().Msgf("Unsupported source: %s", source)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return exec, nil
+}
+
 func BuildDBReader(connURL *url.URL) (data.DBReaderConn, error) {
 	source := connURL.Scheme
 	var reader data.DBReaderConn
