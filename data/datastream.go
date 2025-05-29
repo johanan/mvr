@@ -81,6 +81,10 @@ type DBReaderConn interface {
 	Close() error
 }
 
+type DBExec interface {
+	ExecuteCommand(ctx context.Context, sql_command string) (string, error)
+}
+
 func (sc *StreamConfig) GetBatchSize() int {
 	if sc.BatchSize == 0 {
 		return 100000
