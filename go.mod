@@ -103,5 +103,5 @@ require (
 require (
 	github.com/klauspost/compress v1.18.0 // indirect
 	github.com/pierrec/lz4/v4 v4.1.22 // indirect
-	github.com/spf13/cast v1.9.1
+	github.com/spf13/cast v1.10.0
 )
