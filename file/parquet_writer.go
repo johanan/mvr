@@ -581,6 +581,10 @@ func convertToParquetDecimal(value any, precision, scale int, scaleFactors map[i
 			}
 			return ParquetDecimal{Type: ByteArrayDecimal, ByteArrayVal: byteArray}, nil
 		}
+
+	case []byte:
+		return convertToParquetDecimal(string(v), precision, scale, scaleFactors)
+
 	default:
 		return result, fmt.Errorf("unsupported type %T for DECIMAL conversion", v)
 	}
