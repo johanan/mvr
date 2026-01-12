@@ -269,6 +269,8 @@ func (pb *ParquetBatchWriter) WriteBatch(batch data.Batch) error {
 					pb.columnBuffers[i] = append(buf, v[:])
 				case uuid.UUID:
 					pb.columnBuffers[i] = append(buf, v[:])
+				case []byte:
+					pb.columnBuffers[i] = append(buf, v[:])
 				default:
 					return fmt.Errorf("expected string or UUID for UUID column %s, got %T", col.Name, v)
 				}
