@@ -10,7 +10,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx-shopspring-decimal v0.0.0-20220624020537-1d36b5a1853e
 	github.com/jackc/pgx/v5 v5.7.6
-	github.com/microsoft/go-mssqldb v1.9.3
+	github.com/microsoft/go-mssqldb v1.9.6
 	github.com/rs/zerolog v1.34.0
 	github.com/schollz/progressbar/v3 v3.18.0
 	github.com/shopspring/decimal v1.4.0
