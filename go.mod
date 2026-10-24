@@ -101,7 +101,7 @@ require (
 )
 
 require (
-	github.com/klauspost/compress v1.18.2 // indirect
+	github.com/klauspost/compress v1.18.7 // indirect
 	github.com/pierrec/lz4/v4 v4.1.23 // indirect
 	github.com/spf13/cast v1.10.0
 )
